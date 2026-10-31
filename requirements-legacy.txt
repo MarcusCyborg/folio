@@ -1,0 +1,12 @@
+# Legacy ML and Crawler Dependencies for WikiSearchEngine
+scrapy
+chromadb
+sentence-transformers
+pandas
+tqdm
+lxml
+markdownify
+langchain-experimental
+langchain-huggingface
+nltk
+rake-nltk
