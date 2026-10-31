@@ -84,9 +84,9 @@ def seed_settings(db: Session):
             db.add(AppSetting(key=k, value=v))
     db.flush()
 
-def seed_demo_users(db: Session):
-    if settings.APP_ENV == "production":
-        print("Skipping local demo accounts seeding in production environment.")
+def seed_demo_users(db: Session, skip: bool = False):
+    if skip or settings.APP_ENV in ("production", "staging"):
+        print(f"Skipping local demo accounts seeding in {settings.APP_ENV} environment.")
         return
 
     password = settings.DEMO_PASSWORD
@@ -190,7 +190,7 @@ def seed_taxonomy_and_documents(db: Session):
 
     db.flush()
 
-def run_seed():
+def run_seed(skip_demo_users: bool = False):
     db = SessionLocal()
     try:
         print("Seeding roles and permissions...")
@@ -198,7 +198,7 @@ def run_seed():
         print("Seeding settings...")
         seed_settings(db)
         print("Seeding local demo users...")
-        seed_demo_users(db)
+        seed_demo_users(db, skip=skip_demo_users)
         print("Seeding taxonomy and documents...")
         seed_taxonomy_and_documents(db)
         
@@ -228,4 +228,8 @@ def run_seed():
         db.close()
 
 if __name__ == "__main__":
-    run_seed()
+    import argparse
+    parser = argparse.ArgumentParser(description="Folio Dataset & Taxonomy Seeding CLI")
+    parser.add_argument("--no-demo-users", action="store_true", help="Skip demo user account creation")
+    args = parser.parse_args()
+    run_seed(skip_demo_users=args.no_demo_users)

@@ -1,8 +1,9 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Response, Request, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
+from src.backend.core.config import settings
 from src.backend.core.database import get_db
 from src.backend.core.dependencies import (
     get_session_context,
@@ -17,6 +18,7 @@ from src.backend.core.session import (
 )
 from src.backend.core.security import hash_password, verify_password
 from src.backend.core.exceptions import AppException
+from src.backend.core.rate_limit import rate_limiter, get_client_ip
 from src.backend.models.auth import User
 from src.backend.models.system import AppSetting
 from src.backend.schemas.auth import (
@@ -59,11 +61,27 @@ def get_session(
 @router.post("/register", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
 def register(
     data: RegisterRequest,
+    request: Request,
     response: Response,
     ctx: SessionContext = Depends(get_session_context),
     db: Session = Depends(get_db),
 ):
     """Registers a new user account with role 'member'."""
+    client_ip = get_client_ip(request)
+
+    # Check registration rate limit
+    if settings.RATE_LIMIT_ENABLED:
+        if not rate_limiter.check_and_record_register(
+            client_ip,
+            max_attempts=settings.RATE_LIMIT_REGISTER_MAX,
+            window_seconds=settings.RATE_LIMIT_REGISTER_WINDOW_SECONDS,
+        ):
+            raise AppException(
+                status_code=429,
+                code="TOO_MANY_REQUESTS",
+                message="Too many registration attempts. Please wait before trying again."
+            )
+
     # Check registration_enabled setting
     setting = db.query(AppSetting).filter(AppSetting.key == "registration_enabled").first()
     if setting and setting.value is False:
@@ -120,15 +138,34 @@ def register(
 @router.post("/login", response_model=SessionResponse)
 def login(
     data: LoginRequest,
+    request: Request,
     response: Response,
     ctx: SessionContext = Depends(get_session_context),
     db: Session = Depends(get_db),
 ):
     """Authenticates with email and password, rotating the session cookie and CSRF token."""
     normalized_email = data.email.strip().lower()
+    client_ip = get_client_ip(request)
+    rate_limit_user_key = f"{client_ip}:{normalized_email}"
+    rate_limit_ip_key = f"{client_ip}:ip"
+
+    if settings.RATE_LIMIT_ENABLED:
+        if (
+            not rate_limiter.check_login_rate_limit(rate_limit_user_key, settings.RATE_LIMIT_LOGIN_MAX_FAILED, settings.RATE_LIMIT_LOGIN_WINDOW_SECONDS)
+            or not rate_limiter.check_login_rate_limit(rate_limit_ip_key, settings.RATE_LIMIT_LOGIN_MAX_FAILED * 3, settings.RATE_LIMIT_LOGIN_WINDOW_SECONDS)
+        ):
+            raise AppException(
+                status_code=429,
+                code="TOO_MANY_REQUESTS",
+                message="Too many failed login attempts. Please wait before trying again."
+            )
+
     user = db.query(User).filter(func.lower(User.email) == normalized_email).first()
 
     if not user or not verify_password(data.password, user.password_hash):
+        if settings.RATE_LIMIT_ENABLED:
+            rate_limiter.record_failed_login(rate_limit_user_key)
+            rate_limiter.record_failed_login(rate_limit_ip_key)
         raise AppException(
             status_code=401,
             code="INVALID_CREDENTIALS",
@@ -141,6 +178,11 @@ def login(
             code="ACCOUNT_DISABLED",
             message="Your account has been deactivated",
         )
+
+    # Successful login: reset failed login attempts
+    if settings.RATE_LIMIT_ENABLED:
+        rate_limiter.record_successful_login(rate_limit_user_key)
+        rate_limiter.record_successful_login(rate_limit_ip_key)
 
     new_session, raw_token = rotate_session(db, ctx.session, user=user)
     db.commit()

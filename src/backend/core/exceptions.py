@@ -1,8 +1,14 @@
+import logging
 from typing import Dict, List, Optional
 from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from src.backend.core.config import settings
+from src.backend.core.audit import redact_sensitive_text
+
+logger = logging.getLogger("folio.security")
 
 class AppException(HTTPException):
     def __init__(
@@ -64,4 +70,38 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content=format_error_response("VALIDATION_ERROR", "Request validation failed", fields),
+    )
+
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """
+    Catches unhandled server exceptions (500).
+    In production and staging, redacts error details to prevent leaking stack traces,
+    database connection strings, or system paths.
+    """
+    safe_error_msg = redact_sensitive_text(str(exc))
+    logger.error(
+        "Unhandled exception on %s %s: %s",
+        request.method,
+        request.url.path,
+        safe_error_msg,
+        exc_info=(settings.APP_ENV in ("development", "test")),
+    )
+
+    if settings.APP_ENV in ("production", "staging"):
+        # Strict zero-leak response for production
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=format_error_response(
+                "INTERNAL_SERVER_ERROR",
+                "An unexpected internal server error occurred."
+            ),
+        )
+
+    # In development/test, return descriptive error for debugging
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=format_error_response(
+            "INTERNAL_SERVER_ERROR",
+            f"Internal error: {safe_error_msg}"
+        ),
     )

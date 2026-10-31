@@ -1,21 +1,63 @@
+import re
 from typing import Optional, Any, Dict
 from sqlalchemy.orm import Session
 from src.backend.models.system import AuditLog
 from src.backend.models.auth import User
 
-SENSITIVE_KEYS = {"password", "password_hash", "token", "token_hash", "csrf_token", "secret", "APP_SECRET"}
+SENSITIVE_KEYS = {
+    "password",
+    "password_hash",
+    "token",
+    "token_hash",
+    "csrf_token",
+    "secret",
+    "app_secret",
+    "authorization",
+    "cookie",
+    "set-cookie",
+    "database_url",
+    "api_key",
+    "credential",
+}
+
+CONNECTION_STRING_PATTERN = re.compile(
+    r'(postgresql(?:\+[a-z0-9]+)?://)([^:]+):(.*?)@([^/\s:]+(?::\d+)?/[^\s\?]+)',
+    re.IGNORECASE
+)
+
+TOKEN_PATTERN = re.compile(
+    r'(?i)(token|bearer|password|secret|key|cookie)\s*[:=]\s*["\']?([a-zA-Z0-9_\-\.]{8,})["\']?'
+)
+
+def redact_sensitive_text(text: str) -> str:
+    """
+    Scans a string and redacts connection strings and sensitive credential assignments.
+    """
+    if not isinstance(text, str):
+        return str(text)
+    
+    # Redact connection string user:password
+    result = CONNECTION_STRING_PATTERN.sub(r'\1[REDACTED_USER]:[REDACTED_PASSWORD]@\4', text)
+    # Redact tokens and passwords
+    result = TOKEN_PATTERN.sub(r'\1=[REDACTED]', result)
+    return result
 
 def redact_payload(data: Any) -> Any:
+    """
+    Recursively redacts dictionary keys and strings containing sensitive data.
+    """
     if isinstance(data, dict):
         cleaned = {}
         for k, v in data.items():
-            if any(s.lower() in k.lower() for s in SENSITIVE_KEYS):
+            if any(s in k.lower() for s in SENSITIVE_KEYS):
                 cleaned[k] = "[REDACTED]"
             else:
                 cleaned[k] = redact_payload(v)
         return cleaned
     elif isinstance(data, list):
         return [redact_payload(item) for item in data]
+    elif isinstance(data, str):
+        return redact_sensitive_text(data)
     return data
 
 def write_audit(

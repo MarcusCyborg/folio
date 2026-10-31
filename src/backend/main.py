@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 from typing import Optional
 from fastapi import FastAPI, Query, Depends, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +16,11 @@ from src.backend.core.exceptions import (
     app_exception_handler,
     http_exception_handler,
     validation_exception_handler,
+    unhandled_exception_handler,
+)
+from src.backend.core.middleware import (
+    SecurityHeadersMiddleware,
+    OriginVerificationMiddleware,
 )
 
 # API Routers
@@ -24,23 +30,39 @@ from src.backend.api.engagement import router as engagement_router
 from src.backend.api.events import router as events_router
 from src.backend.api.admin import router as admin_router
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Application lifespan context manager.
+    Executes fail-fast production security configuration validation on boot.
+    """
+    settings.validate_production()
+    yield
+
 app = FastAPI(
     title="Folio — Knowledge & Research Library API",
     description="Enterprise Document & Research Repository API",
     version="2.0.0",
+    lifespan=lifespan,
 )
 
-# Exception Handlers
+# Exception Handlers (including production unhandled 500 redaction)
 app.add_exception_handler(AppException, app_exception_handler)
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(Exception, unhandled_exception_handler)
 
-# CORS Middleware
+# Security Middlewares
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(OriginVerificationMiddleware)
+
+# Standardized CORS Middleware (strictly excludes '*' when credentials are enabled)
+safe_cors_origins = [orig for orig in settings.CORS_ALLOWED_ORIGINS if orig != "*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.APP_ENV == "development" else [],
+    allow_origins=safe_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -50,13 +72,18 @@ def health_check(response: Response, db: Session = Depends(get_db)):
     """
     Lightweight health check.
     Verifies database connectivity without initializing heavy ML models.
+    In production, hides internal database exception details.
     """
     db_status = "ok"
     try:
         db.execute(text("SELECT 1;"))
     except Exception as e:
-        db_status = f"error: {str(e)}"
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        if settings.APP_ENV in ("production", "staging"):
+            db_status = "unavailable"
+        else:
+            db_status = f"error: {str(e)}"
+
         return {
             "status": "error",
             "database": db_status,
@@ -105,7 +132,6 @@ def search_wiki_legacy(
     return service.search(query=q, top_k=k)
 
 # Mount all Phase 1 API Routers under /api/v1
-api_v1_router = FastAPI()
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(library_router, prefix="/api/v1")
 app.include_router(engagement_router, prefix="/api/v1")
