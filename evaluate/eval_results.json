@@ -1,0 +1,677 @@
+{
+  "evaluation_config": {
+    "k": 10,
+    "backend_url": "http://127.0.0.1:8001",
+    "n_queries_total": 20,
+    "n_queries_ok": 20
+  },
+  "aggregate_metrics": {
+    "mean_precision_at_10": 0.575,
+    "MAP": 0.644126
+  },
+  "per_query_results": [
+    {
+      "query_id": "Q01",
+      "query": "deep learning neural network architectures",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Deep_learning",
+        "https://en.wikipedia.org/wiki/Residual_neural_network",
+        "https://en.wikipedia.org/wiki/Neural_network_(biology)",
+        "https://en.wikipedia.org/wiki/Long_short-term_memory",
+        "https://en.wikipedia.org/wiki/Geoffrey_Hinton",
+        "https://en.wikipedia.org/wiki/Neural_engineering",
+        "https://en.wikipedia.org/wiki/Spatial_dependence",
+        "https://en.wikipedia.org/wiki/AI_control_problem",
+        "https://en.wikipedia.org/wiki/Neural_decoding",
+        "https://en.wikipedia.org/wiki/Neural_circuit"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/Deep_learning",
+        "https://en.wikipedia.org/wiki/Long_short-term_memory",
+        "https://en.wikipedia.org/wiki/Neural_network_(biology)",
+        "https://en.wikipedia.org/wiki/Residual_neural_network"
+      ],
+      "metrics": {
+        "precision_at_10": 0.4,
+        "average_precision": 1.0,
+        "response_time_ms": 460.4
+      }
+    },
+    {
+      "query_id": "Q02",
+      "query": "Geoffrey Hinton deep learning researcher",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Geoffrey_Hinton",
+        "https://en.wikipedia.org/wiki/Deep_learning",
+        "https://en.wikipedia.org/wiki/Residual_neural_network",
+        "https://en.wikipedia.org/wiki/Neurobiology",
+        "https://en.wikipedia.org/wiki/Gradient_descent",
+        "https://en.wikipedia.org/wiki/HarperCollins",
+        "https://en.wikipedia.org/wiki/Oren_Etzioni",
+        "https://en.wikipedia.org/wiki/HarperCollins_Speakers_Bureau",
+        "https://en.wikipedia.org/wiki/Amacom",
+        "https://en.wikipedia.org/wiki/AI_control_problem"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/Geoffrey_Hinton"
+      ],
+      "metrics": {
+        "precision_at_10": 0.1,
+        "average_precision": 1.0,
+        "response_time_ms": 188.9
+      }
+    },
+    {
+      "query_id": "Q03",
+      "query": "gradient descent and optimization software",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Gradient_descent",
+        "https://en.wikipedia.org/wiki/MINOS_(optimization_software)",
+        "https://en.wikipedia.org/wiki/Comparison_of_optimization_software",
+        "https://en.wikipedia.org/wiki/List_of_optimization_software",
+        "https://en.wikipedia.org/wiki/HiGHS_optimization_solver",
+        "https://en.wikipedia.org/wiki/SNOPT",
+        "https://en.wikipedia.org/wiki/Gekko_(optimization_software)",
+        "https://en.wikipedia.org/wiki/CasADi",
+        "https://en.wikipedia.org/wiki/Gradient-enhanced_kriging",
+        "https://en.wikipedia.org/wiki/Bayesian_optimization"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/Comparison_of_optimization_software",
+        "https://en.wikipedia.org/wiki/Gekko_(optimization_software)",
+        "https://en.wikipedia.org/wiki/Gradient-enhanced_kriging",
+        "https://en.wikipedia.org/wiki/Gradient_descent",
+        "https://en.wikipedia.org/wiki/Gurobi_Optimizer",
+        "https://en.wikipedia.org/wiki/HiGHS_optimization_solver",
+        "https://en.wikipedia.org/wiki/List_of_optimization_software",
+        "https://en.wikipedia.org/wiki/MINOS_(optimization_software)"
+      ],
+      "metrics": {
+        "precision_at_10": 0.7,
+        "average_precision": 0.829365,
+        "response_time_ms": 252.3
+      }
+    },
+    {
+      "query_id": "Q04",
+      "query": "unemployment types and causes",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Frictional_unemployment",
+        "https://en.wikipedia.org/wiki/Job_creation_program",
+        "https://en.wikipedia.org/wiki/Types_of_unemployment",
+        "https://en.wikipedia.org/wiki/Unemployment",
+        "https://en.wikipedia.org/wiki/Unemployed",
+        "https://en.wikipedia.org/wiki/Structural_unemployment",
+        "https://en.wikipedia.org/wiki/Involuntary_unemployment",
+        "https://en.wikipedia.org/wiki/Graduate_unemployment",
+        "https://en.wikipedia.org/wiki/Unemployment_insurance",
+        "https://en.wikipedia.org/wiki/Unemployment_benefits"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/Frictional_unemployment",
+        "https://en.wikipedia.org/wiki/Graduate_unemployment",
+        "https://en.wikipedia.org/wiki/Involuntary_unemployment",
+        "https://en.wikipedia.org/wiki/Job_creation_program",
+        "https://en.wikipedia.org/wiki/Structural_unemployment",
+        "https://en.wikipedia.org/wiki/Types_of_unemployment",
+        "https://en.wikipedia.org/wiki/Unemployed",
+        "https://en.wikipedia.org/wiki/Unemployment",
+        "https://en.wikipedia.org/wiki/Youth_unemployment"
+      ],
+      "metrics": {
+        "precision_at_10": 0.8,
+        "average_precision": 0.888889,
+        "response_time_ms": 257.1
+      }
+    },
+    {
+      "query_id": "Q05",
+      "query": "unemployment benefits and job guarantee programs",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Job_guarantee",
+        "https://en.wikipedia.org/wiki/Unemployment_insurance",
+        "https://en.wikipedia.org/wiki/Unemployment_benefits",
+        "https://en.wikipedia.org/wiki/Unemployment_extension",
+        "https://en.wikipedia.org/wiki/Job_creation_program",
+        "https://en.wikipedia.org/wiki/Unemployed",
+        "https://en.wikipedia.org/wiki/Types_of_unemployment",
+        "https://en.wikipedia.org/wiki/Unemployment",
+        "https://en.wikipedia.org/wiki/Job_security",
+        "https://en.wikipedia.org/wiki/Youth_unemployment"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/Employer_of_last_resort",
+        "https://en.wikipedia.org/wiki/Guaranteed_minimum_income",
+        "https://en.wikipedia.org/wiki/Job_creation_index",
+        "https://en.wikipedia.org/wiki/Job_guarantee",
+        "https://en.wikipedia.org/wiki/Unemployment_benefits",
+        "https://en.wikipedia.org/wiki/Unemployment_extension",
+        "https://en.wikipedia.org/wiki/Unemployment_insurance",
+        "https://en.wikipedia.org/wiki/Workfare",
+        "https://en.wikipedia.org/wiki/Works_Progress_Administration"
+      ],
+      "metrics": {
+        "precision_at_10": 0.4,
+        "average_precision": 0.444444,
+        "response_time_ms": 239.9
+      }
+    },
+    {
+      "query_id": "Q06",
+      "query": "minimum wage and living wage laws",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Minimum_wage_in_the_United_States",
+        "https://en.wikipedia.org/wiki/Minimum_wage",
+        "https://en.wikipedia.org/wiki/Living_wage",
+        "https://en.wikipedia.org/wiki/Minimum_Wage_Ordinance",
+        "https://en.wikipedia.org/wiki/National_Minimum_Wage_Act_1998",
+        "https://en.wikipedia.org/wiki/Labour_law",
+        "https://en.wikipedia.org/wiki/Labor_and_employment_law",
+        "https://en.wikipedia.org/wiki/Labor_law",
+        "https://en.wikipedia.org/wiki/Labour_code",
+        "https://en.wikipedia.org/wiki/List_of_European_countries_by_minimum_wage"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/List_of_European_countries_by_minimum_wage",
+        "https://en.wikipedia.org/wiki/Living_wage",
+        "https://en.wikipedia.org/wiki/Maximum_wage",
+        "https://en.wikipedia.org/wiki/Minimum_Wage_Ordinance",
+        "https://en.wikipedia.org/wiki/Minimum_wage",
+        "https://en.wikipedia.org/wiki/Minimum_wage_in_Canada",
+        "https://en.wikipedia.org/wiki/Minimum_wage_in_the_United_States",
+        "https://en.wikipedia.org/wiki/National_Minimum_Wage_Act_1998"
+      ],
+      "metrics": {
+        "precision_at_10": 0.6,
+        "average_precision": 0.7,
+        "response_time_ms": 275.5
+      }
+    },
+    {
+      "query_id": "Q07",
+      "query": "wage theft compression and labour wages",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Wage_theft",
+        "https://en.wikipedia.org/wiki/Wage_compression",
+        "https://en.wikipedia.org/wiki/Trade_union",
+        "https://en.wikipedia.org/wiki/Labor_union",
+        "https://en.wikipedia.org/wiki/Labor_unions",
+        "https://en.wikipedia.org/wiki/Wage_labour",
+        "https://en.wikipedia.org/wiki/Decoupling_of_wages_from_productivity",
+        "https://en.wikipedia.org/wiki/Wage_labor",
+        "https://en.wikipedia.org/wiki/Minimum_wage",
+        "https://en.wikipedia.org/wiki/Labour_economics"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/Decoupling_of_wages_from_productivity",
+        "https://en.wikipedia.org/wiki/List_of_countries_by_average_wage",
+        "https://en.wikipedia.org/wiki/Progressive_wage",
+        "https://en.wikipedia.org/wiki/Truck_wages",
+        "https://en.wikipedia.org/wiki/Union_wage_premium",
+        "https://en.wikipedia.org/wiki/Wage",
+        "https://en.wikipedia.org/wiki/Wage_compression",
+        "https://en.wikipedia.org/wiki/Wage_curve",
+        "https://en.wikipedia.org/wiki/Wage_labor",
+        "https://en.wikipedia.org/wiki/Wage_labour",
+        "https://en.wikipedia.org/wiki/Wage_slavery",
+        "https://en.wikipedia.org/wiki/Wage_theft"
+      ],
+      "metrics": {
+        "precision_at_10": 0.5,
+        "average_precision": 0.308036,
+        "response_time_ms": 255.4
+      }
+    },
+    {
+      "query_id": "Q08",
+      "query": "whistleblower protection and reporting misconduct",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Whistleblower_protection_in_the_United_States",
+        "https://en.wikipedia.org/wiki/Wrongful_dismissal",
+        "https://en.wikipedia.org/wiki/Whistleblower_protection_in_Australia",
+        "https://en.wikipedia.org/wiki/Public_Servants_Disclosure_Protection_Act",
+        "https://en.wikipedia.org/wiki/Whistleblower",
+        "https://en.wikipedia.org/wiki/SEC_Office_of_the_Whistleblower",
+        "https://en.wikipedia.org/wiki/List_of_whistleblowers",
+        "https://en.wikipedia.org/wiki/Government_Accountability_Project",
+        "https://en.wikipedia.org/wiki/Sarbanes%E2%80%93Oxley_Act",
+        "https://en.wikipedia.org/wiki/National_Whistleblower_Center"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/David_McBride_(whistleblower)",
+        "https://en.wikipedia.org/wiki/List_of_EPA_whistleblowers",
+        "https://en.wikipedia.org/wiki/List_of_nuclear_whistleblowers",
+        "https://en.wikipedia.org/wiki/List_of_whistleblowers",
+        "https://en.wikipedia.org/wiki/National_Whistleblower_Appreciation_Day",
+        "https://en.wikipedia.org/wiki/National_Whistleblower_Center",
+        "https://en.wikipedia.org/wiki/Nuclear_whistleblowers",
+        "https://en.wikipedia.org/wiki/SEC_Office_of_the_Whistleblower",
+        "https://en.wikipedia.org/wiki/Whistle-blowing_policy_in_Nigeria",
+        "https://en.wikipedia.org/wiki/Whistleblower",
+        "https://en.wikipedia.org/wiki/Whistleblower_Office",
+        "https://en.wikipedia.org/wiki/Whistleblower_protection_in_Australia",
+        "https://en.wikipedia.org/wiki/Whistleblower_protection_in_India",
+        "https://en.wikipedia.org/wiki/Whistleblower_protection_in_the_United_States"
+      ],
+      "metrics": {
+        "precision_at_10": 0.6,
+        "average_precision": 0.303401,
+        "response_time_ms": 264.4
+      }
+    },
+    {
+      "query_id": "Q09",
+      "query": "anti-corruption commissions and bureaus",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Anti-corruption",
+        "https://en.wikipedia.org/wiki/Commission_Against_Corruption_(Macau)",
+        "https://en.wikipedia.org/wiki/International_Anti-Corruption_Academy",
+        "https://en.wikipedia.org/wiki/Anti-Corruption_General_Directorate",
+        "https://en.wikipedia.org/wiki/Anti-Corruption_Commission_(Bangladesh)",
+        "https://en.wikipedia.org/wiki/Oficina_Anticorrupci%C3%B3n",
+        "https://en.wikipedia.org/wiki/Anti-Corruption_and_Civil_Rights_Commission",
+        "https://en.wikipedia.org/wiki/Independent_Commission_Against_Corruption_(Hong_Kong)",
+        "https://en.wikipedia.org/wiki/Police_corruption",
+        "https://en.wikipedia.org/wiki/Corruption"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/2011_Indian_anti-corruption_movement",
+        "https://en.wikipedia.org/wiki/2012_Indian_anti-corruption_movement",
+        "https://en.wikipedia.org/wiki/Anti-Corruption_Commission_(Bangladesh)",
+        "https://en.wikipedia.org/wiki/Anti-Corruption_Commission_of_Myanmar",
+        "https://en.wikipedia.org/wiki/Anti-Corruption_General_Directorate",
+        "https://en.wikipedia.org/wiki/Anti-Corruption_Prosecutor%27s_Office",
+        "https://en.wikipedia.org/wiki/Anti-Corruption_and_Civil_Rights_Commission",
+        "https://en.wikipedia.org/wiki/Anti-corruption",
+        "https://en.wikipedia.org/wiki/Anti-corruption_and_Economic_Malpractice_Observatory",
+        "https://en.wikipedia.org/wiki/Central_Steering_Committee_on_Anti-corruption",
+        "https://en.wikipedia.org/wiki/Commission_Against_Corruption_(Macau)",
+        "https://en.wikipedia.org/wiki/Corruption_Eradication_Commission",
+        "https://en.wikipedia.org/wiki/Corruption_Prevention_and_Combating_Bureau",
+        "https://en.wikipedia.org/wiki/Fiji_Independent_Commission_Against_Corruption",
+        "https://en.wikipedia.org/wiki/Group_of_States_Against_Corruption",
+        "https://en.wikipedia.org/wiki/Independent_Commission_Against_Corruption_(Hong_Kong)",
+        "https://en.wikipedia.org/wiki/Inter-American_Convention_Against_Corruption",
+        "https://en.wikipedia.org/wiki/International_Anti-Corruption_Academy",
+        "https://en.wikipedia.org/wiki/International_Association_of_Anti-Corruption_Authorities",
+        "https://en.wikipedia.org/wiki/Law_on_transparency,_the_fight_against_corruption_and_the_modernization_of_economic_life",
+        "https://en.wikipedia.org/wiki/Malaysian_Anti-Corruption_Commission",
+        "https://en.wikipedia.org/wiki/National_Anti-Corruption_Bureau_of_Ukraine",
+        "https://en.wikipedia.org/wiki/National_Anti-Corruption_Observatory",
+        "https://en.wikipedia.org/wiki/National_Anticorruption_Directorate",
+        "https://en.wikipedia.org/wiki/Oficina_Anticorrupci%C3%B3n",
+        "https://en.wikipedia.org/wiki/Russian_anti-corruption_campaign",
+        "https://en.wikipedia.org/wiki/Sierra_Leone_Anti-corruption_Commission",
+        "https://en.wikipedia.org/wiki/Specialized_Anti-Corruption_Prosecutor%27s_Office",
+        "https://en.wikipedia.org/wiki/United_Nations_Convention_against_Corruption"
+      ],
+      "metrics": {
+        "precision_at_10": 0.8,
+        "average_precision": 0.275862,
+        "response_time_ms": 281.5
+      }
+    },
+    {
+      "query_id": "Q10",
+      "query": "bribery embezzlement and financial crime corruption",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Bribery",
+        "https://en.wikipedia.org/wiki/Anti-corruption",
+        "https://en.wikipedia.org/wiki/Corruption",
+        "https://en.wikipedia.org/wiki/Economics_of_corruption",
+        "https://en.wikipedia.org/wiki/Political_corruption",
+        "https://en.wikipedia.org/wiki/Commercial_bribery",
+        "https://en.wikipedia.org/wiki/Corruption_Perceptions_Index",
+        "https://en.wikipedia.org/wiki/Kickback_(finance)",
+        "https://en.wikipedia.org/wiki/Foreign_Corrupt_Practices_Act",
+        "https://en.wikipedia.org/wiki/United_Nations_Convention_against_Corruption"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/Bribery",
+        "https://en.wikipedia.org/wiki/Commercial_bribery",
+        "https://en.wikipedia.org/wiki/Embezzlement",
+        "https://en.wikipedia.org/wiki/Extortion",
+        "https://en.wikipedia.org/wiki/Foreign_Extortion_Prevention_Act",
+        "https://en.wikipedia.org/wiki/Graft_(politics)",
+        "https://en.wikipedia.org/wiki/Kickback_(finance)",
+        "https://en.wikipedia.org/wiki/Kleptocracy",
+        "https://en.wikipedia.org/wiki/Money_laundering",
+        "https://en.wikipedia.org/wiki/OECD_Anti-Bribery_Convention",
+        "https://en.wikipedia.org/wiki/Slush_fund"
+      ],
+      "metrics": {
+        "precision_at_10": 0.3,
+        "average_precision": 0.155303,
+        "response_time_ms": 259.1
+      }
+    },
+    {
+      "query_id": "Q11",
+      "query": "school bullying and anti-bullying campaigns",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Bullying_and_emotional_intelligence",
+        "https://en.wikipedia.org/wiki/School_bullying",
+        "https://en.wikipedia.org/wiki/Anti-bullying_legislation",
+        "https://en.wikipedia.org/wiki/Bullying_UK",
+        "https://en.wikipedia.org/wiki/Dan_Olweus",
+        "https://en.wikipedia.org/wiki/David_P._Farrington",
+        "https://en.wikipedia.org/wiki/Bullying_of_students_in_higher_education",
+        "https://en.wikipedia.org/wiki/GRIN_Campaign",
+        "https://en.wikipedia.org/wiki/Anti-Bullying_Week",
+        "https://en.wikipedia.org/wiki/Bullying_in_teaching"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/Anti-Bullying_Week",
+        "https://en.wikipedia.org/wiki/Anti-bullying_legislation",
+        "https://en.wikipedia.org/wiki/Bullying_UK",
+        "https://en.wikipedia.org/wiki/Bullying_and_emotional_intelligence",
+        "https://en.wikipedia.org/wiki/International_Stand_Up_to_Bullying_Day",
+        "https://en.wikipedia.org/wiki/School_bullying"
+      ],
+      "metrics": {
+        "precision_at_10": 0.5,
+        "average_precision": 0.759259,
+        "response_time_ms": 285.1
+      }
+    },
+    {
+      "query_id": "Q12",
+      "query": "workplace bullying in professions",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Workplace_bullying_in_academia",
+        "https://en.wikipedia.org/wiki/Legal_aspects_of_workplace_bullying",
+        "https://en.wikipedia.org/wiki/Bullying_in_medicine",
+        "https://en.wikipedia.org/wiki/Gary_Namie",
+        "https://en.wikipedia.org/wiki/Occupational_health_psychology",
+        "https://en.wikipedia.org/wiki/Employee_turnover",
+        "https://en.wikipedia.org/wiki/Bullying_in_nursing",
+        "https://en.wikipedia.org/wiki/Turnover_intention",
+        "https://en.wikipedia.org/wiki/Bullying_in_the_legal_profession",
+        "https://en.wikipedia.org/wiki/Job_performance"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/Bullying_in_information_technology",
+        "https://en.wikipedia.org/wiki/Bullying_in_medicine",
+        "https://en.wikipedia.org/wiki/Bullying_in_nursing",
+        "https://en.wikipedia.org/wiki/Bullying_in_teaching",
+        "https://en.wikipedia.org/wiki/Bullying_in_the_legal_profession",
+        "https://en.wikipedia.org/wiki/Bullying_in_the_military",
+        "https://en.wikipedia.org/wiki/Bullying_of_students_in_higher_education",
+        "https://en.wikipedia.org/wiki/Legal_aspects_of_workplace_bullying",
+        "https://en.wikipedia.org/wiki/Sexual_bullying",
+        "https://en.wikipedia.org/wiki/Workplace_bullying_in_academia"
+      ],
+      "metrics": {
+        "precision_at_10": 0.5,
+        "average_precision": 0.412698,
+        "response_time_ms": 218.3
+      }
+    },
+    {
+      "query_id": "Q13",
+      "query": "teen suicides attributed to bullying",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/List_of_suicides_that_have_been_attributed_to_bullying",
+        "https://en.wikipedia.org/wiki/Bullying_and_suicide",
+        "https://en.wikipedia.org/wiki/Suicide_of_Sladjana_Vidovic",
+        "https://en.wikipedia.org/wiki/LGBTQ_bullying",
+        "https://en.wikipedia.org/wiki/Suicidal_thoughts",
+        "https://en.wikipedia.org/wiki/Suicide_of_Kelly_Yeomans",
+        "https://en.wikipedia.org/wiki/Bullying_and_emotional_intelligence",
+        "https://en.wikipedia.org/wiki/List_of_LGBT-related_suicides",
+        "https://en.wikipedia.org/wiki/School_bullying",
+        "https://en.wikipedia.org/wiki/Suicide_of_Jadin_Bell"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/Bullying_and_suicide",
+        "https://en.wikipedia.org/wiki/List_of_suicides_that_have_been_attributed_to_bullying",
+        "https://en.wikipedia.org/wiki/Suicide_of_Dawn-Marie_Wesley",
+        "https://en.wikipedia.org/wiki/Suicide_of_Hamed_Nastoh",
+        "https://en.wikipedia.org/wiki/Suicide_of_Jadin_Bell",
+        "https://en.wikipedia.org/wiki/Suicide_of_Jamey_Rodemeyer",
+        "https://en.wikipedia.org/wiki/Suicide_of_Kelly_Yeomans",
+        "https://en.wikipedia.org/wiki/Suicide_of_Kenneth_Weishuhn",
+        "https://en.wikipedia.org/wiki/Suicide_of_Lia_Smith",
+        "https://en.wikipedia.org/wiki/Suicide_of_Megan_Meier",
+        "https://en.wikipedia.org/wiki/Suicide_of_Nicola_Ann_Raphael",
+        "https://en.wikipedia.org/wiki/Suicide_of_Phoebe_Prince",
+        "https://en.wikipedia.org/wiki/Suicide_of_Rebecca_Sedwick",
+        "https://en.wikipedia.org/wiki/Suicide_of_Ryan_Halligan",
+        "https://en.wikipedia.org/wiki/Suicide_of_Sladjana_Vidovic",
+        "https://en.wikipedia.org/wiki/Suicide_of_Tyler_Clementi",
+        "https://en.wikipedia.org/wiki/Suicide_of_Tyrone_Unsworth",
+        "https://en.wikipedia.org/wiki/Suicide_of_William_Arthur_Gibbs"
+      ],
+      "metrics": {
+        "precision_at_10": 0.5,
+        "average_precision": 0.231481,
+        "response_time_ms": 217.5
+      }
+    },
+    {
+      "query_id": "Q14",
+      "query": "electoral fraud voter suppression gerrymandering",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Electoral_fraud",
+        "https://en.wikipedia.org/wiki/Ballot_stuffing",
+        "https://en.wikipedia.org/wiki/Vote_suppression",
+        "https://en.wikipedia.org/wiki/Gerrymandering",
+        "https://en.wikipedia.org/wiki/Constituencies",
+        "https://en.wikipedia.org/wiki/Election_security",
+        "https://en.wikipedia.org/wiki/Unfair_election",
+        "https://en.wikipedia.org/wiki/Nomination_rules",
+        "https://en.wikipedia.org/wiki/Election",
+        "https://en.wikipedia.org/wiki/Vote_pairing"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/Ballot_stuffing",
+        "https://en.wikipedia.org/wiki/Election_security",
+        "https://en.wikipedia.org/wiki/Electoral_fraud",
+        "https://en.wikipedia.org/wiki/Gerrymandering",
+        "https://en.wikipedia.org/wiki/Unfair_election",
+        "https://en.wikipedia.org/wiki/Vote_pairing",
+        "https://en.wikipedia.org/wiki/Vote_suppression"
+      ],
+      "metrics": {
+        "precision_at_10": 0.7,
+        "average_precision": 0.912925,
+        "response_time_ms": 199.4
+      }
+    },
+    {
+      "query_id": "Q15",
+      "query": "reduced working week and working hours movements",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Workweek_and_weekend",
+        "https://en.wikipedia.org/wiki/Workweek",
+        "https://en.wikipedia.org/wiki/35-hour_workweek",
+        "https://en.wikipedia.org/wiki/Four-day_week",
+        "https://en.wikipedia.org/wiki/Four-day_workweek",
+        "https://en.wikipedia.org/wiki/Working_time",
+        "https://en.wikipedia.org/wiki/Eight-hour_day",
+        "https://en.wikipedia.org/wiki/40-hour_week",
+        "https://en.wikipedia.org/wiki/Working_Time_Directive_2003",
+        "https://en.wikipedia.org/wiki/Flextime"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/35-hour_workweek",
+        "https://en.wikipedia.org/wiki/40-hour_week",
+        "https://en.wikipedia.org/wiki/996_working_hour_system",
+        "https://en.wikipedia.org/wiki/Eight-hour_day",
+        "https://en.wikipedia.org/wiki/Four-day_week",
+        "https://en.wikipedia.org/wiki/Four-day_workweek",
+        "https://en.wikipedia.org/wiki/Six-hour_day",
+        "https://en.wikipedia.org/wiki/Working_Time_Directive_2003",
+        "https://en.wikipedia.org/wiki/Working_time",
+        "https://en.wikipedia.org/wiki/Workweek",
+        "https://en.wikipedia.org/wiki/Workweek_and_weekend"
+      ],
+      "metrics": {
+        "precision_at_10": 0.9,
+        "average_precision": 0.818182,
+        "response_time_ms": 284.7
+      }
+    },
+    {
+      "query_id": "Q16",
+      "query": "worker classification by collar color",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Designation_of_workers_by_collar_color",
+        "https://en.wikipedia.org/wiki/Blue-collar_worker",
+        "https://en.wikipedia.org/wiki/Pink-collar_worker",
+        "https://en.wikipedia.org/wiki/New-collar_worker",
+        "https://en.wikipedia.org/wiki/Green-collar_worker",
+        "https://en.wikipedia.org/wiki/Grey-collar",
+        "https://en.wikipedia.org/wiki/International_Standard_Classification_of_Occupations",
+        "https://en.wikipedia.org/wiki/Clerical_collar",
+        "https://en.wikipedia.org/wiki/Human_resources",
+        "https://en.wikipedia.org/wiki/Job_analysis"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/Blue-collar_worker",
+        "https://en.wikipedia.org/wiki/Designation_of_workers_by_collar_color",
+        "https://en.wikipedia.org/wiki/Green-collar_worker",
+        "https://en.wikipedia.org/wiki/Grey-collar",
+        "https://en.wikipedia.org/wiki/New-collar_worker",
+        "https://en.wikipedia.org/wiki/Pink-collar_worker"
+      ],
+      "metrics": {
+        "precision_at_10": 0.6,
+        "average_precision": 1.0,
+        "response_time_ms": 263.9
+      }
+    },
+    {
+      "query_id": "Q17",
+      "query": "pension retirement planning and benefits",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Retirement_planning",
+        "https://en.wikipedia.org/wiki/Pension",
+        "https://en.wikipedia.org/wiki/Pension_systems_by_country",
+        "https://en.wikipedia.org/wiki/Retirement",
+        "https://en.wikipedia.org/wiki/Retired",
+        "https://en.wikipedia.org/wiki/Perk-cession",
+        "https://en.wikipedia.org/wiki/Employee_benefits",
+        "https://en.wikipedia.org/wiki/Employee_benefit",
+        "https://en.wikipedia.org/wiki/Retirement_spend-down",
+        "https://en.wikipedia.org/wiki/Mandatory_retirement"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/Golden_handshake",
+        "https://en.wikipedia.org/wiki/Golden_parachute",
+        "https://en.wikipedia.org/wiki/Mandatory_retirement",
+        "https://en.wikipedia.org/wiki/Pension",
+        "https://en.wikipedia.org/wiki/Pension_systems_by_country",
+        "https://en.wikipedia.org/wiki/Pensioner",
+        "https://en.wikipedia.org/wiki/Retired",
+        "https://en.wikipedia.org/wiki/Retirement",
+        "https://en.wikipedia.org/wiki/Retirement_planning",
+        "https://en.wikipedia.org/wiki/Retirement_spend-down",
+        "https://en.wikipedia.org/wiki/Superannuation_Act_2010"
+      ],
+      "metrics": {
+        "precision_at_10": 0.7,
+        "average_precision": 0.578788,
+        "response_time_ms": 250.8
+      }
+    },
+    {
+      "query_id": "Q18",
+      "query": "job hunting resume cover letter and interview",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Cover_letter",
+        "https://en.wikipedia.org/wiki/Job_hunting",
+        "https://en.wikipedia.org/wiki/R%C3%A9sum%C3%A9",
+        "https://en.wikipedia.org/wiki/Resume",
+        "https://en.wikipedia.org/wiki/Job_interview",
+        "https://en.wikipedia.org/wiki/Application_for_employment",
+        "https://en.wikipedia.org/wiki/Job_fraud",
+        "https://en.wikipedia.org/wiki/Letter_of_recommendation",
+        "https://en.wikipedia.org/wiki/Hiring_hall",
+        "https://en.wikipedia.org/wiki/Job_analysis"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/Application_for_employment",
+        "https://en.wikipedia.org/wiki/Cover_letter",
+        "https://en.wikipedia.org/wiki/Curriculum_vitae",
+        "https://en.wikipedia.org/wiki/Job_fair",
+        "https://en.wikipedia.org/wiki/Job_hunting",
+        "https://en.wikipedia.org/wiki/Job_interview",
+        "https://en.wikipedia.org/wiki/Letter_of_recommendation",
+        "https://en.wikipedia.org/wiki/R%C3%A9sum%C3%A9",
+        "https://en.wikipedia.org/wiki/Resume"
+      ],
+      "metrics": {
+        "precision_at_10": 0.7,
+        "average_precision": 0.763889,
+        "response_time_ms": 229.2
+      }
+    },
+    {
+      "query_id": "Q19",
+      "query": "nepotism cronyism and favoritism",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Nepotism",
+        "https://en.wikipedia.org/wiki/Cronyism",
+        "https://en.wikipedia.org/wiki/Crony_capitalism",
+        "https://en.wikipedia.org/wiki/Corruption",
+        "https://en.wikipedia.org/wiki/Despotism",
+        "https://en.wikipedia.org/wiki/Misplaced_loyalty",
+        "https://en.wikipedia.org/wiki/Rankism",
+        "https://en.wikipedia.org/wiki/Social_dominance_orientation",
+        "https://en.wikipedia.org/wiki/Altruistic",
+        "https://en.wikipedia.org/wiki/Altruism"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/Clientelism",
+        "https://en.wikipedia.org/wiki/Crony_capitalism",
+        "https://en.wikipedia.org/wiki/Cronyism",
+        "https://en.wikipedia.org/wiki/Nepotism"
+      ],
+      "metrics": {
+        "precision_at_10": 0.3,
+        "average_precision": 0.75,
+        "response_time_ms": 238.5
+      }
+    },
+    {
+      "query_id": "Q20",
+      "query": "leave of absence sick and parental leave",
+      "retrieved_urls": [
+        "https://en.wikipedia.org/wiki/Parental_leave",
+        "https://en.wikipedia.org/wiki/Paid_time_off",
+        "https://en.wikipedia.org/wiki/Leave_of_absence",
+        "https://en.wikipedia.org/wiki/Sick_leave",
+        "https://en.wikipedia.org/wiki/Long_service_leave",
+        "https://en.wikipedia.org/wiki/Sick_leave_in_the_United_States",
+        "https://en.wikipedia.org/wiki/Compassionate_leave",
+        "https://en.wikipedia.org/wiki/List_of_minimum_annual_leave_by_country",
+        "https://en.wikipedia.org/wiki/Annual_leave",
+        "https://en.wikipedia.org/wiki/Presenteeism"
+      ],
+      "relevant_urls": [
+        "https://en.wikipedia.org/wiki/Annual_leave",
+        "https://en.wikipedia.org/wiki/Bereavement_leave",
+        "https://en.wikipedia.org/wiki/Compassionate_leave",
+        "https://en.wikipedia.org/wiki/Leave_of_absence",
+        "https://en.wikipedia.org/wiki/List_of_minimum_annual_leave_by_country",
+        "https://en.wikipedia.org/wiki/Long_service_leave",
+        "https://en.wikipedia.org/wiki/Marriage_leave",
+        "https://en.wikipedia.org/wiki/Paid_time_off",
+        "https://en.wikipedia.org/wiki/Parental_leave",
+        "https://en.wikipedia.org/wiki/Sick_leave",
+        "https://en.wikipedia.org/wiki/Sick_leave_in_the_United_States",
+        "https://en.wikipedia.org/wiki/Stress_leave"
+      ],
+      "metrics": {
+        "precision_at_10": 0.9,
+        "average_precision": 0.75,
+        "response_time_ms": 230.5
+      }
+    }
+  ],
+  "oracle_metrics": {
+    "oracle_precision_at_10": 0.805,
+    "note": "Giới hạn lý thuyết tối đa dựa trên ground truth coverage trong dataset"
+  }
+}
