@@ -54,6 +54,7 @@ def bootstrap_admin(
     display_name: str = "Super Administrator",
     rotate: bool = False,
     db: Session = None,
+    commit: bool = True,
 ) -> User:
     """
     Provisions a new Super Admin or rotates credentials of an existing Super Admin.
@@ -67,9 +68,11 @@ def bootstrap_admin(
     try:
         validate_admin_password(password, settings.APP_ENV)
 
-        # Ensure base taxonomy, roles, and permissions exist
-        seed_roles_and_permissions(db)
-        seed_settings(db)
+        # Ensure base taxonomy, roles, and permissions exist if not yet provisioned
+        from src.backend.models.auth import Role
+        if not db.query(Role).filter(Role.key == "super_admin").first():
+            seed_roles_and_permissions(db)
+            seed_settings(db)
 
         norm_email = email.strip().lower()
         norm_username = username.strip().lower()
@@ -107,7 +110,10 @@ def bootstrap_admin(
                 before=before_state,
                 after={"role_key": "super_admin", "is_active": True, "sessions_revoked": revoked_count},
             )
-            db.commit()
+            if commit:
+                db.commit()
+            else:
+                db.flush()
             print(f"[SUCCESS] Admin account '{existing_user.username}' ({existing_user.email}) password rotated. Revoked {revoked_count} active sessions.")
             return existing_user
 
@@ -132,12 +138,16 @@ def bootstrap_admin(
             before=None,
             after={"username": new_admin.username, "role_key": "super_admin"},
         )
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
         print(f"[SUCCESS] Initial Super Admin account '{new_admin.username}' ({new_admin.email}) provisioned successfully.")
         return new_admin
 
     except Exception:
-        db.rollback()
+        if commit:
+            db.rollback()
         raise
     finally:
         if should_close_db:

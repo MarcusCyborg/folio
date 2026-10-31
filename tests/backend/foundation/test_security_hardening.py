@@ -185,42 +185,48 @@ def test_login_rate_limiting_abuse(client):
     assert res_blocked.status_code == 429
     assert res_blocked.json()["error"]["code"] == "TOO_MANY_REQUESTS"
 
-def test_registration_rate_limiting_abuse(client):
+def test_registration_rate_limiting_abuse(client, db_session):
     """Repeated registration requests from the same IP trigger 429 TOO_MANY_REQUESTS."""
     sess_res = client.get("/api/v1/auth/session")
     csrf_token = sess_res.json()["csrf_token"]
 
-    for i in range(settings.RATE_LIMIT_REGISTER_MAX):
-        reg_res = client.post(
+    try:
+        for i in range(settings.RATE_LIMIT_REGISTER_MAX):
+            reg_res = client.post(
+                "/api/v1/auth/register",
+                headers={"X-CSRF-Token": csrf_token},
+                json={
+                    "email": f"flood_{i}@folio.test",
+                    "username": f"flood_{i}",
+                    "password": "Password1234!",
+                    "display_name": f"User {i}",
+                }
+            )
+            assert reg_res.status_code == 201
+            csrf_token = reg_res.json()["csrf_token"]
+
+        # Next attempt exceeds limit
+        res_limit = client.post(
             "/api/v1/auth/register",
             headers={"X-CSRF-Token": csrf_token},
             json={
-                "email": f"flood_{i}@folio.test",
-                "username": f"flood_{i}",
+                "email": "flood_overflow@folio.test",
+                "username": "flood_overflow",
                 "password": "Password1234!",
-                "display_name": f"User {i}",
+                "display_name": "Flood Overflow",
             }
         )
-        assert reg_res.status_code == 201
-        csrf_token = reg_res.json()["csrf_token"]
+        assert res_limit.status_code == 429
+        assert res_limit.json()["error"]["code"] == "TOO_MANY_REQUESTS"
+    finally:
+        # Cleanup registered test accounts
+        floods = db_session.query(User).filter(User.username.like("flood_%")).all()
+        for u in floods:
+            db_session.delete(u)
+        db_session.flush()
 
-    # Next attempt exceeds limit
-    res_limit = client.post(
-        "/api/v1/auth/register",
-        headers={"X-CSRF-Token": csrf_token},
-        json={
-            "email": "flood_overflow@folio.test",
-            "username": "flood_overflow",
-            "password": "Password1234!",
-            "display_name": "Flood Overflow",
-        }
-    )
-    assert res_limit.status_code == 429
-    assert res_limit.json()["error"]["code"] == "TOO_MANY_REQUESTS"
-
-def test_admin_bootstrap_cli_creation_and_rotation():
+def test_admin_bootstrap_cli_creation_and_rotation(db_session):
     """Admin bootstrap CLI creates super admin, rotates password, revokes sessions, and protects passwords."""
-    db = TestingSessionLocal()
     test_email = "bootstrap_admin_test@folio.test"
     test_user = "boot_admin_test"
     initial_pwd = "InitialStrongAdminPassword2026!"
@@ -228,10 +234,10 @@ def test_admin_bootstrap_cli_creation_and_rotation():
 
     try:
         # Clean up any pre-existing user with this test email
-        existing = db.query(User).filter(User.username == test_user).first()
+        existing = db_session.query(User).filter(User.username == test_user).first()
         if existing:
-            db.delete(existing)
-            db.commit()
+            db_session.delete(existing)
+            db_session.flush()
 
         # 1. Provision new admin
         admin = bootstrap_admin(
@@ -240,7 +246,8 @@ def test_admin_bootstrap_cli_creation_and_rotation():
             password=initial_pwd,
             display_name="Bootstrap Admin",
             rotate=False,
-            db=db,
+            db=db_session,
+            commit=False,
         )
         assert admin.id is not None
         assert admin.role_key == "super_admin"
@@ -254,13 +261,14 @@ def test_admin_bootstrap_cli_creation_and_rotation():
                 username=test_user,
                 password=rotated_pwd,
                 rotate=False,
-                db=db,
+                db=db_session,
+                commit=False,
             )
 
         # 3. Create an active session for this admin
-        sess_obj, raw_token = create_session(db, user=admin)
-        db.commit()
-        assert get_session_by_token(db, raw_token) is not None
+        sess_obj, raw_token = create_session(db_session, user=admin)
+        db_session.flush()
+        assert get_session_by_token(db_session, raw_token) is not None
 
         # 4. Rotate credentials with rotate=True
         rotated_admin = bootstrap_admin(
@@ -268,21 +276,21 @@ def test_admin_bootstrap_cli_creation_and_rotation():
             username=test_user,
             password=rotated_pwd,
             rotate=True,
-            db=db,
+            db=db_session,
+            commit=False,
         )
         assert verify_password(rotated_pwd, rotated_admin.password_hash)
         assert not verify_password(initial_pwd, rotated_admin.password_hash)
 
         # 5. Verify old session was revoked upon password rotation
-        assert get_session_by_token(db, raw_token) is None
+        assert get_session_by_token(db_session, raw_token) is None
 
     finally:
         # Cleanup
-        to_clean = db.query(User).filter(User.username == test_user).first()
+        to_clean = db_session.query(User).filter(User.username == test_user).first()
         if to_clean:
-            db.delete(to_clean)
-            db.commit()
-        db.close()
+            db_session.delete(to_clean)
+            db_session.flush()
 
 def test_secret_redaction_in_audit_and_text():
     """Sensitive keys, connection strings, and tokens are redacted from logs and audits."""
