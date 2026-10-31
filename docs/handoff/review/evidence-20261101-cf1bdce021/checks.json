@@ -1,0 +1,85 @@
+[
+  {
+    "check": "migration-heads",
+    "command": [
+      "python",
+      "-m",
+      "alembic",
+      "heads"
+    ],
+    "cwd": "F:\\dpl13.10\\WikiSearchEngine-github",
+    "exit_code": 0
+  },
+  {
+    "check": "migration-offline",
+    "command": [
+      "python",
+      "-m",
+      "alembic",
+      "upgrade",
+      "head",
+      "--sql"
+    ],
+    "cwd": "F:\\dpl13.10\\WikiSearchEngine-github",
+    "exit_code": 0
+  },
+  {
+    "check": "migration-online-unavailable",
+    "command": [
+      "python",
+      "-m",
+      "alembic",
+      "upgrade",
+      "head"
+    ],
+    "cwd": "F:\\dpl13.10\\WikiSearchEngine-github",
+    "exit_code": 1
+  },
+  {
+    "check": "backend-collect",
+    "command": [
+      "python",
+      "-m",
+      "pytest",
+      "tests/backend",
+      "--collect-only",
+      "-q",
+      "-p",
+      "no:cacheprovider"
+    ],
+    "cwd": "F:\\dpl13.10\\WikiSearchEngine-github",
+    "exit_code": 0
+  },
+  {
+    "check": "backend-suite-unavailable",
+    "command": [
+      "python",
+      "-m",
+      "pytest",
+      "tests/backend",
+      "-q",
+      "--maxfail=1",
+      "--tb=short",
+      "-p",
+      "no:cacheprovider",
+      "--junitxml=C:\\Users\\Admin\\AppData\\Local\\Temp\\folio-ia-review-cf1bdce021\\backend-junit.xml"
+    ],
+    "cwd": "F:\\dpl13.10\\WikiSearchEngine-github",
+    "exit_code": 1
+  },
+  {
+    "check": "frontend-collect",
+    "command": [
+      "python",
+      "-m",
+      "pytest",
+      "tests/frontend",
+      "--collect-only",
+      "-q",
+      "-p",
+      "no:cacheprovider"
+    ],
+    "cwd": "F:\\dpl13.10\\WikiSearchEngine-github",
+    "exit_code": 0
+  }
+]

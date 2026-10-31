@@ -1,0 +1,66 @@
+{
+  "F:\\dpl13.10\\WikiSearchEngine-github": {
+    "head": "c4b19cffa676b4437e7346da2c410b198b04dc2c",
+    "status": [
+      "?? FOLIO-COMPLETION-PLAN.md",
+      "?? GEMINI-EXECUTION-PROMPTS.md",
+      "?? docs/acceptance-matrix.md",
+      "?? docs/handoff/gemini/CLONE-REPORT.md",
+      "?? docs/handoff/gemini/P00-baseline.md",
+      "?? docs/handoff/gemini/P01-production-security.md",
+      "?? docs/handoff/review/INTEGRATION-A-REVIEW.md",
+      "?? docs/handoff/review/evidence-20261101-cf1bdce021/backend-junit.xml",
+      "?? docs/handoff/review/evidence-20261101-cf1bdce021/checks.json",
+      "?? docs/handoff/review/evidence-20261101-cf1bdce021/guard-contract.json",
+      "?? docs/handoff/review/evidence-20261101-cf1bdce021/main-probe.json",
+      "?? docs/handoff/review/evidence-20261101-cf1bdce021/p01-probe.json",
+      "?? docs/handoff/review/evidence-20261101-cf1bdce021/pip-freeze.txt",
+      "?? docs/handoff/review/evidence-20261101-cf1bdce021/probe_guard_contract.py",
+      "?? docs/handoff/review/evidence-20261101-cf1bdce021/probe_runtime.py",
+      "?? docs/handoff/review/evidence-20261101-cf1bdce021/pyvenv.cfg.txt",
+      "?? docs/handoff/review/evidence-20261101-cf1bdce021/run_checks.py",
+      "?? docs/search-contract.md"
+    ],
+    "sha256": {
+      "src/backend/main.py": "8d0f5317c1dfa7f6ad79b2976926bb04386d64653a675d82b59062aedfa564df",
+      "src/backend/core/config.py": "0ed97116942f752e461196c99839f2af3b91884e4be77feb4fd5142b23e4d96f",
+      "tests/conftest.py": "83945e9adabff07ddb97082743a3b53dd7f34fe404d26718377cc8a6426ac62b",
+      "scripts/seed_folio.py": "0e3c511a509b91f8f1707321cb6756c11d8d36e7da69138b9189e956a2ca9a6e",
+      "fixtures/folio/documents.jsonl": "5413a1f6265dc5f4ccea0081356690e54bd63ed78c6b63ad1fee9025b4183abe",
+      "docs/search-contract.md": "34350661398ab3db6dc91546807e3650aa90da2a88dc6602ec67c417987432d4"
+    }
+  },
+  "F:\\dpl13.10\\WikiSearchEngine-p01": {
+    "head": "740eb5f1cc5f6b0c90480310e37a36234086a726",
+    "status": [
+      "?? FOLIO-COMPLETION-PLAN.md",
+      "?? GEMINI-EXECUTION-PROMPTS.md",
+      "?? docs/acceptance-matrix.md",
+      "?? docs/handoff/gemini/CLONE-REPORT.md",
+      "?? docs/handoff/gemini/P00-baseline.md",
+      "?? docs/search-contract.md"
+    ],
+    "sha256": {
+      "src/backend/main.py": "52754c33bc6a640039ae8594a4929d891508b6b5041b9d169cfd63c9abacd340",
+      "src/backend/core/config.py": "429c370a01180ad938b1800eb2c2c87bba720be7cd670f2997216dd24f08fdc0",
+      "tests/conftest.py": "83945e9adabff07ddb97082743a3b53dd7f34fe404d26718377cc8a6426ac62b",
+      "scripts/seed_folio.py": "347874220253c9b16e9b5d313a6402e98c33be8bd0f5957918eb712511069c33",
+      "fixtures/folio/documents.jsonl": "5413a1f6265dc5f4ccea0081356690e54bd63ed78c6b63ad1fee9025b4183abe",
+      "docs/search-contract.md": "34350661398ab3db6dc91546807e3650aa90da2a88dc6602ec67c417987432d4",
+      "scripts/bootstrap_admin.py": "eb7c068dc0b291e3a68605cd3795315080ff02f9a0ed86d8df07993de4bbb1fa"
+    }
+  },
+  "F:\\dpl13.10\\WikiSearchEngine-p02": {
+    "head": "1ac72ad8a9e979682ddad8253c0d6d3e49222055",
+    "status": [],
+    "sha256": {
+      "src/backend/main.py": "8d0f5317c1dfa7f6ad79b2976926bb04386d64653a675d82b59062aedfa564df",
+      "src/backend/core/config.py": "0ed97116942f752e461196c99839f2af3b91884e4be77feb4fd5142b23e4d96f",
+      "tests/conftest.py": "b4046d38440b7dfb68c394f39ec8b1d0fd0457982d03b376527820d8e7fae4c8",
+      "scripts/seed_folio.py": "a9f36820d619065850c5e3583083d53f018c2d7cc69bcce82dc4aab48ef4f33e",
+      "fixtures/folio/documents.jsonl": "5413a1f6265dc5f4ccea0081356690e54bd63ed78c6b63ad1fee9025b4183abe",
+      "docs/search-contract.md": "34350661398ab3db6dc91546807e3650aa90da2a88dc6602ec67c417987432d4",
+      ".github/workflows/ci.yml": "394b4230e1e070643ab381951e2670008ecaee7a06787133ceb6a99967592e6c"
+    }
+  }
+}
