@@ -1,0 +1,3 @@
+# Folio — Frontend & Browser E2E Testing Dependencies
+-r requirements-dev.txt
+playwright>=1.40.0,<=1.63.0

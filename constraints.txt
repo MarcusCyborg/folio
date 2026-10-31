@@ -1,0 +1,25 @@
+# Folio — Pinned & Verified Dependencies Constraints
+# Verified on Python 3.10 with PostgreSQL 16+
+
+# Core Runtime
+fastapi==0.162.0
+uvicorn==0.49.0
+pydantic==2.14.2
+pydantic-settings==2.15.0
+sqlalchemy==2.0.55
+psycopg==3.3.6
+psycopg-binary==3.3.6
+alembic==1.20.1
+argon2-cffi==25.1.0
+argon2-cffi-bindings==26.1.0
+python-multipart==0.0.32
+bleach==6.4.0
+markdown==3.10.2
+python-dotenv==1.2.2
+
+# Testing & Dev
+pytest==9.2.0
+httpx==0.28.1
+
+# Browser Automation
+playwright==1.63.0
