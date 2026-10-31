@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" width="100%" height="100%">
+  <defs>
+    <linearGradient id="tbg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090d16" />
+      <stop offset="100%" stop-color="#1e1e38" />
+    </linearGradient>
+    <linearGradient id="gradQ" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#b45309" />
+    </linearGradient>
+    <linearGradient id="gradK" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#1d4ed8" />
+    </linearGradient>
+    <linearGradient id="gradV" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#047857" />
+    </linearGradient>
+    <linearGradient id="gradBlock" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#334155" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+  </defs>
+
+  <rect width="800" height="450" rx="12" fill="url(#tbg)" />
+  <rect x="1" y="1" width="798" height="448" rx="11" fill="none" stroke="#475569" stroke-width="1.5" />
+
+  <!-- Header -->
+  <text x="400" y="42" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="700" fill="#f8fafc" text-anchor="middle">Scaled Dot-Product Attention &amp; Multi-Head Structure</text>
+  <text x="400" y="64" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" fill="#94a3b8" text-anchor="middle">Attention(Q, K, V) = softmax(QKᵀ / √dₖ) V</text>
+
+  <!-- Left: Single Attention Head Flow -->
+  <rect x="60" y="90" width="320" height="330" rx="10" fill="#131b2e" stroke="#2563eb" stroke-dasharray="4,4" stroke-width="1.5" />
+  <text x="220" y="115" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700" fill="#60a5fa" text-anchor="middle">Scaled Dot-Product Attention Core</text>
+
+  <!-- Input Q, K, V boxes at bottom of core -->
+  <rect x="80" y="360" width="60" height="36" rx="6" fill="url(#gradQ)" />
+  <text x="110" y="383" font-family="monospace" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">Q</text>
+
+  <rect x="190" y="360" width="60" height="36" rx="6" fill="url(#gradK)" />
+  <text x="220" y="383" font-family="monospace" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">K</text>
+
+  <rect x="300" y="360" width="60" height="36" rx="6" fill="url(#gradV)" />
+  <text x="330" y="383" font-family="monospace" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">V</text>
+
+  <!-- MatMul QK^T -->
+  <rect x="120" y="295" width="120" height="34" rx="6" fill="url(#gradBlock)" stroke="#64748b" />
+  <text x="180" y="317" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600" fill="#e2e8f0" text-anchor="middle">MatMul (Q · Kᵀ)</text>
+
+  <!-- Scale -->
+  <rect x="120" y="240" width="120" height="30" rx="6" fill="url(#gradBlock)" stroke="#64748b" />
+  <text x="180" y="260" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="600" fill="#cbd5e1" text-anchor="middle">Scale (÷ √dₖ)</text>
+
+  <!-- Softmax -->
+  <rect x="120" y="185" width="120" height="30" rx="6" fill="url(#gradBlock)" stroke="#a855f7" stroke-width="1.5" />
+  <text x="180" y="205" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="700" fill="#c084fc" text-anchor="middle">Softmax</text>
+
+  <!-- MatMul with V -->
+  <rect x="150" y="130" width="140" height="34" rx="6" fill="url(#gradBlock)" stroke="#10b981" stroke-width="1.5" />
+  <text x="220" y="152" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="700" fill="#34d399" text-anchor="middle">MatMul (Weights · V)</text>
+
+  <!-- Flow Arrows left -->
+  <g stroke="#94a3b8" stroke-width="1.5" fill="none">
+    <path d="M 110 360 L 110 340 L 160 340 L 160 330" />
+    <path d="M 220 360 L 220 330" />
+    <path d="M 180 295 L 180 270" />
+    <path d="M 180 240 L 180 215" />
+    <path d="M 180 185 L 180 170 L 200 170 L 200 165" />
+    <path d="M 330 360 L 330 147 L 290 147" />
+  </g>
+
+  <!-- Right: Multi-Head Composition -->
+  <rect x="420" y="90" width="320" height="330" rx="10" fill="#131b2e" stroke="#8b5cf6" stroke-width="1.5" />
+  <text x="580" y="115" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700" fill="#a78bfa" text-anchor="middle">Multi-Head Attention (h = 8)</text>
+
+  <!-- Stacked Heads -->
+  <rect x="445" y="270" width="70" height="60" rx="6" fill="#312e81" stroke="#6366f1" stroke-width="1" />
+  <text x="480" y="305" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="600" fill="#c7d2fe" text-anchor="middle">Head 1</text>
+
+  <rect x="525" y="270" width="70" height="60" rx="6" fill="#312e81" stroke="#6366f1" stroke-width="1" />
+  <text x="560" y="305" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="600" fill="#c7d2fe" text-anchor="middle">Head 2</text>
+
+  <text x="610" y="305" font-family="monospace" font-size="14" fill="#a5b4fc" text-anchor="middle">···</text>
+
+  <rect x="635" y="270" width="80" height="60" rx="6" fill="#312e81" stroke="#6366f1" stroke-width="1" />
+  <text x="675" y="305" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="600" fill="#c7d2fe" text-anchor="middle">Head h</text>
+
+  <!-- Concat Block -->
+  <rect x="460" y="200" width="240" height="36" rx="6" fill="url(#gradBlock)" stroke="#8b5cf6" stroke-width="1.5" />
+  <text x="580" y="223" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="700" fill="#e2e8f0" text-anchor="middle">Concat(head₁, ..., headₕ)</text>
+
+  <!-- Linear Projection W^O -->
+  <rect x="480" y="135" width="200" height="36" rx="6" fill="url(#gradBlock)" stroke="#38bdf8" stroke-width="1.5" />
+  <text x="580" y="158" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="700" fill="#38bdf8" text-anchor="middle">Linear Projection (Wᴼ)</text>
+
+  <!-- Flow arrows right -->
+  <g stroke="#94a3b8" stroke-width="1.5" fill="none">
+    <path d="M 480 270 L 480 236" />
+    <path d="M 560 270 L 560 236" />
+    <path d="M 675 270 L 675 236" />
+    <path d="M 580 200 L 580 171" />
+    <path d="M 580 135 L 580 115" stroke-dasharray="2,2" />
+  </g>
+
+  <!-- Bottom annotation -->
+  <text x="580" y="380" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#94a3b8" text-anchor="middle">Allows model to jointly attend to information</text>
+  <text x="580" y="398" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#94a3b8" text-anchor="middle">at different positions from diverse representation subspaces.</text>
+</svg>

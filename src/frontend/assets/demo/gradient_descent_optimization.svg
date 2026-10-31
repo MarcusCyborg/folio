@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" width="100%" height="100%">
+  <defs>
+    <linearGradient id="gdBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+    <linearGradient id="optTarget" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+  </defs>
+
+  <rect width="800" height="450" rx="12" fill="url(#gdBg)" />
+  <rect x="1" y="1" width="798" height="448" rx="11" fill="none" stroke="#334155" stroke-width="1.5" />
+
+  <!-- Header -->
+  <text x="400" y="40" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="700" fill="#f8fafc" text-anchor="middle">Gradient Descent Optimization Trajectory on Loss Surface</text>
+  <text x="400" y="62" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" fill="#94a3b8" text-anchor="middle">Iterative Update Rule: θ_{t+1} = θ_t - η ∇L(θ_t) Converging to Local/Global Minimum</text>
+
+  <!-- Center Contour Center: (400, 260) -->
+  <g transform="translate(400, 260)" fill="none" stroke-width="1.5">
+    <!-- Concentric Loss Contours (Ellipses) -->
+    <ellipse cx="0" cy="0" rx="340" ry="160" stroke="#1e293b" stroke-width="2" />
+    <ellipse cx="0" cy="0" rx="280" ry="130" stroke="#334155" />
+    <text x="275" y="5" font-family="monospace" font-size="10" fill="#64748b">L = 12.0</text>
+
+    <ellipse cx="0" cy="0" rx="220" ry="100" stroke="#475569" />
+    <text x="215" y="5" font-family="monospace" font-size="10" fill="#64748b">L = 8.0</text>
+
+    <ellipse cx="0" cy="0" rx="160" ry="70" stroke="#3b82f6" opacity="0.6" />
+    <text x="155" y="5" font-family="monospace" font-size="10" fill="#60a5fa">L = 4.5</text>
+
+    <ellipse cx="0" cy="0" rx="100" ry="45" stroke="#38bdf8" opacity="0.8" />
+    <text x="95" y="5" font-family="monospace" font-size="10" fill="#38bdf8">L = 2.0</text>
+
+    <ellipse cx="0" cy="0" rx="45" ry="20" stroke="#34d399" stroke-width="2" />
+    <text x="40" y="5" font-family="monospace" font-size="10" fill="#34d399">L = 0.5</text>
+
+    <!-- Global Minimum Target Point -->
+    <circle cx="0" cy="0" r="6" fill="url(#optTarget)" stroke="#a7f3d0" stroke-width="2" />
+    <text x="0" y="-12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="700" fill="#34d399" text-anchor="middle">θ* (Minimum)</text>
+
+    <!-- Axes -->
+    <line x1="-350" y1="0" x2="350" y2="0" stroke="#334155" stroke-dasharray="3,3" />
+    <line x1="0" y1="-165" x2="0" y2="165" stroke="#334155" stroke-dasharray="3,3" />
+    <text x="345" y="-8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#64748b" text-anchor="end">Parameter θ₁</text>
+    <text x="8" y="-150" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#64748b">Parameter θ₂</text>
+
+    <!-- Optimization Step Trajectory (Pink/Red to Green) -->
+    <!-- Points: θ0(-240, -110) -> θ1(-140, -65) -> θ2(-70, -32) -> θ3(-30, -14) -> θ4(-10, -4) -> θ*(0,0) -->
+    <g stroke="#f43f5e" stroke-width="2.5" marker-end="url(#arrow)">
+      <line x1="-240" y1="-110" x2="-140" y2="-65" />
+      <line x1="-140" y1="-65" x2="-70" y2="-32" />
+      <line x1="-70" y1="-32" x2="-30" y2="-14" />
+      <line x1="-30" y1="-14" x2="-10" y2="-4" />
+      <line x1="-10" y1="-4" x2="-2" y2="-1" />
+    </g>
+
+    <!-- Step Points -->
+    <circle cx="-240" cy="-110" r="5" fill="#f43f5e" stroke="#fff" stroke-width="1.5" />
+    <text x="-240" y="-122" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="700" fill="#fb7185" text-anchor="middle">θ₀ (Init)</text>
+
+    <circle cx="-140" cy="-65" r="4" fill="#fb7185" />
+    <circle cx="-70" cy="-32" r="4" fill="#fb7185" />
+    <circle cx="-30" cy="-14" r="3.5" fill="#fb7185" />
+  </g>
+
+  <!-- Legend Box -->
+  <g transform="translate(60, 90)">
+    <rect width="180" height="74" rx="6" fill="#0f172a" stroke="#475569" />
+    <line x1="15" y1="22" x2="35" y2="22" stroke="#f43f5e" stroke-width="2.5" />
+    <circle cx="25" cy="22" r="3.5" fill="#f43f5e" />
+    <text x="45" y="26" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#e2e8f0">Descent Steps: -η∇L</text>
+
+    <ellipse cx="25" cy="48" rx="10" ry="5" stroke="#38bdf8" fill="none" />
+    <text x="45" y="52" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#e2e8f0">Loss Isocontour</text>
+  </g>
+</svg>

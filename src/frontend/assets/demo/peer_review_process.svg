@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" width="100%" height="100%">
+  <defs>
+    <linearGradient id="prBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+    <linearGradient id="stepSubmit" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="100%" stop-color="#0369a1" />
+    </linearGradient>
+    <linearGradient id="stepEditor" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7c3aed" />
+      <stop offset="100%" stop-color="#5b21b6" />
+    </linearGradient>
+    <linearGradient id="stepReview" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#d97706" />
+      <stop offset="100%" stop-color="#b45309" />
+    </linearGradient>
+    <linearGradient id="stepDecision" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#059669" />
+      <stop offset="100%" stop-color="#047857" />
+    </linearGradient>
+  </defs>
+
+  <rect width="800" height="450" rx="12" fill="url(#prBg)" />
+  <rect x="1" y="1" width="798" height="448" rx="11" fill="none" stroke="#334155" stroke-width="1.5" />
+
+  <!-- Header -->
+  <text x="400" y="40" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="700" fill="#f8fafc" text-anchor="middle">Academic Peer Review &amp; Publication Lifecycle</text>
+  <text x="400" y="62" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" fill="#94a3b8" text-anchor="middle">Single &amp; Double-Blind Evaluation Workflow for Scholarly Research Validation</text>
+
+  <!-- Step 1: Manuscript Submission -->
+  <g transform="translate(50, 110)">
+    <rect width="130" height="90" rx="8" fill="#132138" stroke="#38bdf8" stroke-width="1.5" />
+    <rect x="0" y="0" width="130" height="26" rx="8" fill="url(#stepSubmit)" />
+    <text x="65" y="18" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="700" fill="#fff" text-anchor="middle">1. Submission</text>
+    <text x="65" y="48" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10.5" fill="#e2e8f0" text-anchor="middle">Authors draft &amp;</text>
+    <text x="65" y="64" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10.5" fill="#e2e8f0" text-anchor="middle">submit preprint</text>
+    <text x="65" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9" fill="#94a3b8" text-anchor="middle">Conflict disclosures</text>
+  </g>
+
+  <!-- Arrow 1 -> 2 -->
+  <line x1="180" y1="155" x2="230" y2="155" stroke="#38bdf8" stroke-width="2" />
+  <polygon points="230,151 240,155 230,159" fill="#38bdf8" />
+
+  <!-- Step 2: Editorial Screening -->
+  <g transform="translate(240, 110)">
+    <rect width="130" height="90" rx="8" fill="#1d1738" stroke="#a78bfa" stroke-width="1.5" />
+    <rect x="0" y="0" width="130" height="26" rx="8" fill="url(#stepEditor)" />
+    <text x="65" y="18" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="700" fill="#fff" text-anchor="middle">2. Editorial Triage</text>
+    <text x="65" y="48" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10.5" fill="#e2e8f0" text-anchor="middle">Editor-in-Chief</text>
+    <text x="65" y="64" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10.5" fill="#e2e8f0" text-anchor="middle">desk check</text>
+    <text x="65" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9" fill="#f43f5e" text-anchor="middle">Desk Reject risk</text>
+  </g>
+
+  <!-- Arrow 2 -> 3 -->
+  <line x1="370" y1="155" x2="420" y2="155" stroke="#a78bfa" stroke-width="2" />
+  <polygon points="420,151 430,155 420,159" fill="#a78bfa" />
+
+  <!-- Step 3: Peer Review Evaluation -->
+  <g transform="translate(430, 110)">
+    <rect width="140" height="90" rx="8" fill="#2d1c08" stroke="#f59e0b" stroke-width="1.5" />
+    <rect x="0" y="0" width="140" height="26" rx="8" fill="url(#stepReview)" />
+    <text x="70" y="18" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="700" fill="#fff" text-anchor="middle">3. External Review</text>
+    <text x="70" y="48" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10.5" fill="#e2e8f0" text-anchor="middle">2–4 Independent</text>
+    <text x="70" y="64" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10.5" fill="#e2e8f0" text-anchor="middle">referee critiques</text>
+    <text x="70" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9" fill="#fbbf24" text-anchor="middle">Methodology &amp; Rigor</text>
+  </g>
+
+  <!-- Arrow 3 -> 4 -->
+  <line x1="570" y1="155" x2="620" y2="155" stroke="#f59e0b" stroke-width="2" />
+  <polygon points="620,151 630,155 620,159" fill="#f59e0b" />
+
+  <!-- Step 4: Editorial Decision -->
+  <g transform="translate(630, 110)">
+    <rect width="130" height="90" rx="8" fill="#0d281e" stroke="#10b981" stroke-width="1.5" />
+    <rect x="0" y="0" width="130" height="26" rx="8" fill="url(#stepDecision)" />
+    <text x="65" y="18" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="700" fill="#fff" text-anchor="middle">4. Decision</text>
+    <text x="65" y="48" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10.5" fill="#4ade80" text-anchor="middle">Accept / Publish</text>
+    <text x="65" y="64" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10.5" fill="#fbbf24" text-anchor="middle">Major Revision</text>
+    <text x="65" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10.5" fill="#f87171" text-anchor="middle">Reject</text>
+  </g>
+
+  <!-- Revision Loop (Feedback Cycle) -->
+  <g transform="translate(180, 260)">
+    <rect width="440" height="85" rx="8" fill="#1e293b" stroke="#eab308" stroke-dasharray="4,4" stroke-width="1.5" />
+    <text x="220" y="28" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="700" fill="#fef08a" text-anchor="middle">Revision &amp; Response Loop (Major / Minor Revision)</text>
+    <text x="220" y="50" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10.5" fill="#cbd5e1" text-anchor="middle">Authors address referee points point-by-point with new experiments &amp; manuscript diffs.</text>
+    <text x="220" y="68" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" fill="#94a3b8" text-anchor="middle">Re-evaluated by original reviewers or editor before final publication.</text>
+  </g>
+
+  <!-- Flow connecting decision back to revision, and revision back to submission/editor -->
+  <g stroke="#eab308" stroke-width="1.5" fill="none">
+    <path d="M 695 200 L 695 300 L 620 300" />
+    <polygon points="620,296 610,300 620,304" fill="#eab308" stroke="none" />
+
+    <path d="M 180 300 L 115 300 L 115 205" />
+    <polygon points="111,205 115,195 119,205" fill="#eab308" stroke="none" />
+  </g>
+
+  <text x="400" y="415" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#94a3b8" text-anchor="middle">Peer review ensures methodological integrity, reproducibility, and ethical compliance across science.</text>
+</svg>

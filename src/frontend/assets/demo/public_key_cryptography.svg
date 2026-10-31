@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" width="100%" height="100%">
+  <defs>
+    <linearGradient id="pkBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+    <linearGradient id="gradAlice" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+    <linearGradient id="gradBob" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#047857" />
+    </linearGradient>
+    <linearGradient id="gradKeyPublic" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+    <linearGradient id="gradKeyPrivate" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ec4899" />
+      <stop offset="100%" stop-color="#be185d" />
+    </linearGradient>
+  </defs>
+
+  <rect width="800" height="450" rx="12" fill="url(#pkBg)" />
+  <rect x="1" y="1" width="798" height="448" rx="11" fill="none" stroke="#334155" stroke-width="1.5" />
+
+  <!-- Header -->
+  <text x="400" y="40" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="700" fill="#f8fafc" text-anchor="middle">Asymmetric Public-Key Cryptography Architecture</text>
+  <text x="400" y="62" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" fill="#94a3b8" text-anchor="middle">Diffie-Hellman / RSA Model: Public Encryption Key &amp; Mathematically Linked Private Decryption Key</text>
+
+  <!-- Sender (Alice) Box -->
+  <g transform="translate(60, 100)">
+    <rect width="180" height="260" rx="8" fill="#132138" stroke="#0284c7" stroke-width="1.5" />
+    <rect x="0" y="0" width="180" height="34" rx="8" fill="url(#gradAlice)" />
+    <text x="90" y="22" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">Sender (Alice)</text>
+
+    <!-- Plaintext -->
+    <rect x="25" y="55" width="130" height="40" rx="6" fill="#1e293b" stroke="#38bdf8" />
+    <text x="90" y="79" font-family="monospace" font-size="12" font-weight="700" fill="#e0f2fe" text-anchor="middle">Plaintext m</text>
+
+    <!-- Encryption Box -->
+    <rect x="25" y="140" width="130" height="60" rx="6" fill="#1e293b" stroke="#f59e0b" stroke-width="1.5" />
+    <text x="90" y="162" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="700" fill="#fbbf24" text-anchor="middle">Encrypt: c = E(m, K_pub)</text>
+    <text x="90" y="185" font-family="monospace" font-size="10" fill="#94a3b8" text-anchor="middle">c = mᵉ mod N</text>
+
+    <path d="M 90 95 L 90 140" stroke="#38bdf8" stroke-width="1.5" />
+  </g>
+
+  <!-- Insecure Channel (Center) -->
+  <g transform="translate(290, 150)">
+    <rect width="220" height="150" rx="8" fill="#1e1b2e" stroke="#ef4444" stroke-dasharray="4,4" stroke-width="1.5" />
+    <text x="110" y="28" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="700" fill="#f87171" text-anchor="middle">Insecure Public Channel</text>
+
+    <!-- Ciphertext payload -->
+    <rect x="30" y="50" width="160" height="42" rx="6" fill="#0f172a" stroke="#ef4444" stroke-width="1.5" />
+    <text x="110" y="72" font-family="monospace" font-size="11" font-weight="700" fill="#fca5a5" text-anchor="middle">Ciphertext c (Encrypted)</text>
+    <text x="110" y="85" font-family="monospace" font-size="9" fill="#94a3b8" text-anchor="middle">7f9a2b8c4d1e0f...</text>
+
+    <text x="110" y="125" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9.5" fill="#fca5a5" text-anchor="middle">Eavesdropper cannot invert c</text>
+    <text x="110" y="139" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9.5" fill="#fca5a5" text-anchor="middle">without Private Key d</text>
+  </g>
+
+  <!-- Channel Flow Arrows -->
+  <g stroke="#f59e0b" stroke-width="2" fill="none">
+    <path d="M 215 230 L 290 230" />
+    <polygon points="290,226 300,230 290,234" fill="#f59e0b" stroke="none" />
+  </g>
+  <g stroke="#ef4444" stroke-width="2" fill="none">
+    <path d="M 510 230 L 560 230" />
+    <polygon points="560,226 570,230 560,234" fill="#ef4444" stroke="none" />
+  </g>
+
+  <!-- Recipient (Bob) Box -->
+  <g transform="translate(560, 100)">
+    <rect width="180" height="260" rx="8" fill="#13271f" stroke="#059669" stroke-width="1.5" />
+    <rect x="0" y="0" width="180" height="34" rx="8" fill="url(#gradBob)" />
+    <text x="90" y="22" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">Recipient (Bob)</text>
+
+    <!-- Decryption Box -->
+    <rect x="25" y="100" width="130" height="60" rx="6" fill="#1e293b" stroke="#ec4899" stroke-width="1.5" />
+    <text x="90" y="122" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="700" fill="#f472b6" text-anchor="middle">Decrypt: m = D(c, K_priv)</text>
+    <text x="90" y="145" font-family="monospace" font-size="10" fill="#94a3b8" text-anchor="middle">m = cᵈ mod N</text>
+
+    <!-- Recovered Plaintext -->
+    <rect x="25" y="195" width="130" height="40" rx="6" fill="#1e293b" stroke="#10b981" />
+    <text x="90" y="219" font-family="monospace" font-size="12" font-weight="700" fill="#a7f3d0" text-anchor="middle">Plaintext m</text>
+
+    <path d="M 90 160 L 90 195" stroke="#10b981" stroke-width="1.5" />
+  </g>
+
+  <!-- Key Pair Distribution -->
+  <!-- Bob's Public Key sent to Alice -->
+  <path d="M 650 95 L 650 78 L 150 78 L 150 135" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3,3" fill="none" />
+  <rect x="340" y="68" width="120" height="22" rx="4" fill="#78350f" stroke="#f59e0b" />
+  <text x="400" y="83" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="700" fill="#fef08a" text-anchor="middle">Bob's Public Key (e, N)</text>
+
+  <!-- Footer -->
+  <text x="400" y="415" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#94a3b8" text-anchor="middle">Underpinned by computational intractability of prime factorization and discrete logarithms.</text>
+</svg>

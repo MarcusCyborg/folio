@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" width="100%" height="100%">
+  <defs>
+    <linearGradient id="clBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+    <linearGradient id="gradSensory" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="100%" stop-color="#0369a1" />
+    </linearGradient>
+    <linearGradient id="gradWorking" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7c3aed" />
+      <stop offset="100%" stop-color="#5b21b6" />
+    </linearGradient>
+    <linearGradient id="gradLongTerm" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#059669" />
+      <stop offset="100%" stop-color="#047857" />
+    </linearGradient>
+  </defs>
+
+  <rect width="800" height="450" rx="12" fill="url(#clBg)" />
+  <rect x="1" y="1" width="798" height="448" rx="11" fill="none" stroke="#334155" stroke-width="1.5" />
+
+  <!-- Header -->
+  <text x="400" y="40" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="700" fill="#f8fafc" text-anchor="middle">Cognitive Load Theory &amp; Human Memory Architecture</text>
+  <text x="400" y="62" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" fill="#94a3b8" text-anchor="middle">Sweller (1988): Working Memory Capacity Constraints &amp; Schema Construction</text>
+
+  <!-- 3 Major Stages Containers -->
+  <!-- 1. Sensory Memory -->
+  <g transform="translate(60, 95)">
+    <rect width="180" height="280" rx="8" fill="#131e33" stroke="#0284c7" stroke-width="1.5" />
+    <rect x="0" y="0" width="180" height="38" rx="8" fill="url(#gradSensory)" />
+    <text x="90" y="24" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">Sensory Memory</text>
+
+    <text x="90" y="70" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#94a3b8" text-anchor="middle">Unlimited Capacity</text>
+    <text x="90" y="88" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#94a3b8" text-anchor="middle">Transient Duration (&lt; 2s)</text>
+
+    <!-- Sensory modalities -->
+    <rect x="25" y="120" width="130" height="36" rx="6" fill="#1e293b" stroke="#38bdf8" />
+    <text x="90" y="142" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="600" fill="#e0f2fe" text-anchor="middle">Visual Inputs</text>
+
+    <rect x="25" y="170" width="130" height="36" rx="6" fill="#1e293b" stroke="#38bdf8" />
+    <text x="90" y="192" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="600" fill="#e0f2fe" text-anchor="middle">Auditory Inputs</text>
+
+    <text x="90" y="250" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#64748b" text-anchor="middle">Selective Attention</text>
+  </g>
+
+  <!-- Arrow Sensory -> Working -->
+  <g stroke="#38bdf8" stroke-width="2" fill="none">
+    <path d="M 240 235 L 305 235" />
+    <polygon points="305,231 315,235 305,239" fill="#38bdf8" stroke="none" />
+  </g>
+
+  <!-- 2. Working Memory (Central Bottleneck) -->
+  <g transform="translate(315, 95)">
+    <rect width="230" height="280" rx="8" fill="#1e183a" stroke="#7c3aed" stroke-width="2" />
+    <rect x="0" y="0" width="230" height="38" rx="8" fill="url(#gradWorking)" />
+    <text x="115" y="24" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">Working Memory (Limited)</text>
+
+    <text x="115" y="60" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#c4b5fd" text-anchor="middle">Capacity: 4 ± 1 Elements</text>
+
+    <!-- Three Cognitive Load Components -->
+    <rect x="20" y="80" width="190" height="48" rx="6" fill="#831843" stroke="#f43f5e" stroke-width="1.5" />
+    <text x="115" y="100" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="700" fill="#fecdd3" text-anchor="middle">Intrinsic Load</text>
+    <text x="115" y="116" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9.5" fill="#fbcfe8" text-anchor="middle">Material complexity &amp; element interactivity</text>
+
+    <rect x="20" y="138" width="190" height="48" rx="6" fill="#713f12" stroke="#eab308" stroke-width="1.5" />
+    <text x="115" y="158" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="700" fill="#fef08a" text-anchor="middle">Extraneous Load</text>
+    <text x="115" y="174" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9.5" fill="#fef9c3" text-anchor="middle">Poor instructional design / noise (Reduce)</text>
+
+    <rect x="20" y="196" width="190" height="48" rx="6" fill="#064e3b" stroke="#10b981" stroke-width="1.5" />
+    <text x="115" y="216" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="700" fill="#a7f3d0" text-anchor="middle">Germane Load</text>
+    <text x="115" y="232" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9.5" fill="#d1fae5" text-anchor="middle">Processing effort for schema integration</text>
+
+    <text x="115" y="265" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" font-weight="600" fill="#ec4899" text-anchor="middle">Total Load ≤ Working Memory Limit</text>
+  </g>
+
+  <!-- Arrow Working -> Long Term -->
+  <g stroke="#10b981" stroke-width="2" fill="none">
+    <path d="M 545 235 L 600 235" />
+    <polygon points="600,231 610,235 600,239" fill="#10b981" stroke="none" />
+  </g>
+
+  <!-- 3. Long-Term Memory -->
+  <g transform="translate(610, 95)">
+    <rect width="140" height="280" rx="8" fill="#13271f" stroke="#059669" stroke-width="1.5" />
+    <rect x="0" y="0" width="140" height="38" rx="8" fill="url(#gradLongTerm)" />
+    <text x="70" y="24" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">Long-Term Memory</text>
+
+    <text x="70" y="70" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#a7f3d0" text-anchor="middle">Permanent Storage</text>
+    <text x="70" y="88" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#a7f3d0" text-anchor="middle">Unlimited Capacity</text>
+
+    <rect x="15" y="130" width="110" height="40" rx="6" fill="#1e293b" stroke="#34d399" />
+    <text x="70" y="154" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="600" fill="#d1fae5" text-anchor="middle">Cognitive Schemas</text>
+
+    <rect x="15" y="185" width="110" height="40" rx="6" fill="#1e293b" stroke="#34d399" />
+    <text x="70" y="209" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="600" fill="#d1fae5" text-anchor="middle">Automated Skills</text>
+  </g>
+
+  <!-- Footer note -->
+  <text x="400" y="415" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#94a3b8" text-anchor="middle">Effective pedagogy minimizes extraneous load to maximize available capacity for germane schema encoding.</text>
+</svg>

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Folio — Knowledge & Research Library</title>
+  <link rel="stylesheet" href="assets/fonts/fonts.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header class="shell-header">
+    <div class="shell-header-inner">
+      <a href="#/library" class="shell-brand">
+        <span class="shell-logo-wordmark" id="shellBrandName">Folio</span>
+        <span class="shell-tagline" id="shellBrandTagline">Knowledge & Research Library</span>
+      </a>
+
+      <nav class="shell-nav" id="shellNav">
+        <a href="#/library" class="nav-link" id="navLibrary">Library</a>
+        <a href="#/admin" class="nav-link" id="navAdmin" style="display: none;">Administration</a>
+      </nav>
+
+      <div class="shell-user-menu" id="shellUserMenu">
+        <span class="spinner" id="userMenuSpinner"></span>
+        <div id="userMenuContent" style="display: none;"></div>
+      </div>
+    </div>
+  </header>
+
+  <main id="app" role="main"></main>
+
+  <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
