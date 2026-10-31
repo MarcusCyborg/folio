@@ -21,6 +21,20 @@ from src.backend.core.database import get_db
 import src.backend.core.database as core_db
 from src.backend.main import app
 from src.backend.models.base import Base
+from src.backend.core.test_db_guard import (
+    validate_test_database_safety,
+    validate_test_database_target,
+    TestRunManifest,
+    verify_connected_identity,
+    safe_reset_test_schema,
+    selective_terminate_backends_sql,
+    provision_test_database,
+    safe_teardown_test_database,
+    UnownedDatabaseError,
+    TestDatabaseSafetyError,
+    ConnectedIdentityMismatchError,
+    sanitize_ambient_libpq_env,
+)
 
 # Artifact directories for test failures
 TEST_RESULTS_DIR = PROJECT_ROOT / "test-results"
@@ -29,60 +43,17 @@ FAILURE_TRACES_DIR = TEST_RESULTS_DIR / "traces"
 FAILURE_SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 FAILURE_TRACES_DIR.mkdir(parents=True, exist_ok=True)
 
-def validate_test_database_safety(test_db_url_str: str, main_db_url_str: str | None = None) -> str:
-    """
-    Strict safety guard for TEST_DATABASE_URL:
-    - Parses URL structure to isolate target database name.
-    - Prevents targeting root, development, or production databases.
-    - Ensures target database name explicitly designates a test database.
-    - Prevents accidental collision with primary DATABASE_URL.
-    """
-    try:
-        test_url = make_url(test_db_url_str)
-    except Exception as e:
-        raise RuntimeError(f"Invalid TEST_DATABASE_URL '{test_db_url_str}': {e}") from e
+# Sanitize ambient libpq environment variables to prevent driver target redirection
+sanitize_ambient_libpq_env()
 
-    target_db = test_url.database
-    if not target_db:
-        raise RuntimeError(f"Unsafe TEST_DATABASE_URL '{test_db_url_str}': No target database name specified.")
+# Test run ownership manifest for this pytest session
+session_manifest = TestRunManifest.create()
 
-    # Guard 1: Must be explicitly designated as a test database name
-    target_db_clean = target_db.strip().lower()
-    if not (target_db_clean.endswith("_test") or target_db_clean.startswith("test_") or target_db_clean == "folio_test"):
-        raise RuntimeError(
-            f"Unsafe TEST_DATABASE_URL '{test_db_url_str}': Target database name '{target_db}' must end with '_test', "
-            f"start with 'test_', or equal 'folio_test' to prevent data loss."
-        )
+# Validate test database target using pure effective-driver-target safety guard
+target_validation = validate_test_database_target(settings.TEST_DATABASE_URL, settings.DATABASE_URL)
+test_db_url = target_validation.test_url_str
+session_manifest.register_owned(target_validation.effective_database)
 
-    # Guard 2: Prohibit reserved/production names
-    forbidden_dbs = {"postgres", "template0", "template1", "folio", "folio_prod", "production", "prod"}
-    if target_db_clean in forbidden_dbs:
-        raise RuntimeError(
-            f"Unsafe TEST_DATABASE_URL '{test_db_url_str}': Target database name '{target_db}' is a protected/production name."
-        )
-
-    # Guard 3: Must not collide with primary DATABASE_URL
-    if main_db_url_str:
-        try:
-            main_url = make_url(main_db_url_str)
-            if (
-                test_url.host == main_url.host
-                and test_url.port == main_url.port
-                and target_db_clean == (main_url.database or "").strip().lower()
-            ):
-                raise RuntimeError(
-                    f"Unsafe TEST_DATABASE_URL collision: TEST_DATABASE_URL and DATABASE_URL both target database '{target_db}' on {test_url.host}."
-                )
-        except RuntimeError:
-            raise
-        except Exception:
-            pass
-
-    return test_db_url_str
-
-
-# Validate safety guard before creating test engine
-test_db_url = validate_test_database_safety(settings.TEST_DATABASE_URL, settings.DATABASE_URL)
 test_engine = create_engine(test_db_url, poolclass=pool.NullPool)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine, expire_on_commit=False)
 
@@ -92,9 +63,15 @@ core_db.SessionLocal = TestingSessionLocal
 
 
 def ensure_test_database_exists(db_url_str: str):
-    """Connects to administrative database ('postgres') and provisions the test DB if it does not exist."""
+    """
+    Connects to administrative database ('postgres') and provisions the test DB if it does not exist.
+    Strictly terminates connections ONLY for the run's owned database to avoid blanket terminating other runs.
+    """
     url = make_url(db_url_str)
     target_db = url.database
+    if not target_db:
+        raise TestDatabaseSafetyError("No target database specified in test URL.")
+
     admin_url = url.set(database="postgres")
     admin_engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
     try:
@@ -106,13 +83,11 @@ def ensure_test_database_exists(db_url_str: str):
             if not exists:
                 print(f"[conftest] Auto-creating test database '{target_db}'...")
                 conn.execute(text(f'CREATE DATABASE "{target_db}"'))
+                session_manifest.register_owned(target_db)
                 print(f"[conftest] Test database '{target_db}' created successfully.")
             else:
-                # Terminate any lingering connections to prevent lock deadlocks during schema reset
-                conn.execute(
-                    text("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :name AND pid <> pg_backend_pid()"),
-                    {"name": target_db}
-                )
+                # Terminate ONLY connections to this specific database
+                conn.execute(text(selective_terminate_backends_sql(target_db)))
     except Exception as e:
         print(f"[conftest] Note on auto-create test DB: {e}")
     finally:
@@ -122,16 +97,13 @@ def ensure_test_database_exists(db_url_str: str):
 @pytest.fixture(scope="session", autouse=True)
 def prepare_test_database():
     """
-    Ensures test database exists, resets public schema, runs Alembic migrations to head,
-    and seeds clean baseline fixtures. Disposes connections on teardown.
+    Ensures test database exists, resets public schema safely with connected identity check,
+    runs Alembic migrations to head, and seeds clean baseline fixtures. Disposes connections on teardown.
     """
     ensure_test_database_exists(test_db_url)
 
-    # 1. Reset schema for clean migration
-    with test_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-        conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
-        conn.execute(text("CREATE SCHEMA public"))
-        conn.execute(text("GRANT ALL ON SCHEMA public TO public"))
+    # 1. Reset schema safely with pre-mutation connected identity check (never auto-drops on mismatch)
+    safe_reset_test_schema(test_engine, session_manifest, target_validation.effective_database)
 
     # 2. Run alembic upgrade head
     import argparse
