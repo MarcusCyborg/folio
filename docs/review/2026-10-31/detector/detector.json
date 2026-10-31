@@ -1,0 +1,55 @@
+[
+  {
+    "antipattern": "cream-palette",
+    "name": "Cream / beige palette",
+    "description": "A warm cream or beige page background has become the default \"tasteful\" AI surface, reached for by reflex. Choose a background that comes from a deliberate palette, not the safe warm off-white.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "F:\\dpl13.10\\WikiSearchEngine\\src\\frontend\\index.html",
+    "line": 0,
+    "snippet": "cream/beige page background rgb(246, 244, 238)"
+  },
+  {
+    "antipattern": "side-tab",
+    "name": "Side-tab accent border",
+    "description": "Thick colored border on one side of a card — the most recognizable tell of AI-generated UIs. Use a subtler accent or remove it entirely.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "F:\\dpl13.10\\WikiSearchEngine\\src\\frontend\\public\\public.css",
+    "line": 407,
+    "snippet": "border-left: 4px solid var(--color-accent)",
+    "importedBy": [
+      "style.css"
+    ]
+  },
+  {
+    "antipattern": "side-tab",
+    "name": "Side-tab accent border",
+    "description": "Thick colored border on one side of a card — the most recognizable tell of AI-generated UIs. Use a subtler accent or remove it entirely.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "F:\\dpl13.10\\WikiSearchEngine\\src\\frontend\\style.css",
+    "line": 352,
+    "snippet": "border-left: 4px solid #2980B9"
+  },
+  {
+    "antipattern": "side-tab",
+    "name": "Side-tab accent border",
+    "description": "Thick colored border on one side of a card — the most recognizable tell of AI-generated UIs. Use a subtler accent or remove it entirely.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "F:\\dpl13.10\\WikiSearchEngine\\src\\frontend\\style.css",
+    "line": 358,
+    "snippet": "border-left: 4px solid var(--color-danger)"
+  },
+  {
+    "antipattern": "side-tab",
+    "name": "Side-tab accent border",
+    "description": "Thick colored border on one side of a card — the most recognizable tell of AI-generated UIs. Use a subtler accent or remove it entirely.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "F:\\dpl13.10\\WikiSearchEngine\\src\\frontend\\style.css",
+    "line": 364,
+    "snippet": "border-left: 4px solid var(--color-success)"
+  }
+]
