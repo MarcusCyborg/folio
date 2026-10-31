@@ -11,27 +11,10 @@ SERVER_PORT = 8089
 BASE_URL = f"http://127.0.0.1:{SERVER_PORT}"
 VERIFICATION_DIR = Path(__file__).resolve().parent.parent.parent.parent / "docs" / "verification" / "admin"
 
-@pytest.fixture(scope="module")
-def live_server():
-    import threading
-    import uvicorn
-    from src.backend.main import app
-
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=SERVER_PORT, log_level="error"))
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    time.sleep(1.2)
-    yield BASE_URL
-    server.should_exit = True
-    thread.join(timeout=2)
-
-@pytest.fixture(scope="module")
-def browser_instance():
-    p = sync_playwright().start()
-    browser = p.chromium.launch(channel="chrome", headless=True)
-    yield browser
-    browser.close()
-    p.stop()
+@pytest.fixture(scope="module", autouse=True)
+def configure_server(live_server):
+    global BASE_URL
+    BASE_URL = live_server
 
 def login_user(page, email, password="FolioDemo2026!"):
     page.goto(f"{BASE_URL}/#/login")
@@ -66,15 +49,17 @@ def test_capture_admin_screens_and_viewports(live_server, browser_instance):
     time.sleep(0.5)
     page.screenshot(path=str(VERIFICATION_DIR / "admin_editor_preview_1440x900.png"))
 
-    # Taxonomy Management
+    # Taxonomy Management - discard editor dirty guard when navigating
     page.goto(f"{BASE_URL}/#/admin/taxonomy")
+    if page.locator("button:has-text('Discard & Leave')").count() > 0:
+        page.click("button:has-text('Discard & Leave')")
     page.wait_for_selector(".taxonomy-grid")
     time.sleep(0.5)
     page.screenshot(path=str(VERIFICATION_DIR / "admin_taxonomy_1440x900.png"))
 
     # Moderation Comments
     page.goto(f"{BASE_URL}/#/admin/comments")
-    page.wait_for_selector(".table")
+    page.wait_for_selector(".table, .empty-state")
     time.sleep(0.5)
     page.screenshot(path=str(VERIFICATION_DIR / "admin_comments_1440x900.png"))
 

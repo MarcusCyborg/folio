@@ -1,17 +1,18 @@
 import os
 import sys
 import json
+import argparse
 from pathlib import Path
 from datetime import datetime, timezone
-from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import func, create_engine
 
 # Ensure project root in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.backend.core.config import settings
-from src.backend.core.database import SessionLocal
+from src.backend.core.database import SessionLocal, engine as default_engine
 from src.backend.core.security import hash_password
 from src.backend.models.auth import Role, Permission, RolePermission, User
 from src.backend.models.taxonomy import Category, Tag
@@ -190,28 +191,53 @@ def seed_taxonomy_and_documents(db: Session):
 
     db.flush()
 
-def run_seed():
-    db = SessionLocal()
+def seed_database_all(db: Session):
+    """Executes all seed stages within an existing session."""
+    print("Seeding roles and permissions...")
+    seed_roles_and_permissions(db)
+    print("Seeding settings...")
+    seed_settings(db)
+    print("Seeding local demo users...")
+    seed_demo_users(db)
+    print("Seeding taxonomy and documents...")
+    seed_taxonomy_and_documents(db)
+
+    # Add audit log for system seeding
+    admin_user = db.query(User).filter(User.username == "admin").first()
+    db.add(AuditLog(
+        actor_id=admin_user.id if admin_user else None,
+        action="system.seed",
+        entity_type="system",
+        entity_id="init",
+        after={"timestamp": datetime.now(timezone.utc).isoformat()}
+    ))
+    db.commit()
+
+def run_seed(target=None, db_url=None):
+    """
+    Idempotent seeding entry point.
+    target can be:
+      - None (uses settings.DATABASE_URL via default SessionLocal)
+      - a Session instance (caller manages lifecycle)
+      - an Engine instance
+    db_url can be a database URL string.
+    """
+    if isinstance(target, Session):
+        seed_database_all(target)
+        return
+
+    owned_engine = None
+    if target is not None and hasattr(target, "connect"):
+        session_factory = sessionmaker(autocommit=False, autoflush=False, bind=target)
+    elif db_url:
+        owned_engine = create_engine(db_url, pool_pre_ping=True)
+        session_factory = sessionmaker(autocommit=False, autoflush=False, bind=owned_engine)
+    else:
+        session_factory = SessionLocal
+
+    db = session_factory()
     try:
-        print("Seeding roles and permissions...")
-        seed_roles_and_permissions(db)
-        print("Seeding settings...")
-        seed_settings(db)
-        print("Seeding local demo users...")
-        seed_demo_users(db)
-        print("Seeding taxonomy and documents...")
-        seed_taxonomy_and_documents(db)
-        
-        # Add audit log for system seeding
-        admin_user = db.query(User).filter(User.username == "admin").first()
-        db.add(AuditLog(
-            actor_id=admin_user.id if admin_user else None,
-            action="system.seed",
-            entity_type="system",
-            entity_id="init",
-            after={"timestamp": datetime.now(timezone.utc).isoformat()}
-        ))
-        db.commit()
+        seed_database_all(db)
         
         # Report totals
         user_count = db.query(User).count()
@@ -226,6 +252,20 @@ def run_seed():
         raise
     finally:
         db.close()
+        if owned_engine:
+            owned_engine.dispose()
+
+def main():
+    parser = argparse.ArgumentParser(description="Seed Folio database with initial fixtures")
+    parser.add_argument("--db-url", type=str, default=None, help="Explicit database URL to seed")
+    parser.add_argument("--test", action="store_true", help="Seed TEST_DATABASE_URL instead of primary DATABASE_URL")
+    args = parser.parse_args()
+
+    target_url = args.db_url
+    if args.test:
+        target_url = settings.TEST_DATABASE_URL
+
+    run_seed(db_url=target_url)
 
 if __name__ == "__main__":
-    run_seed()
+    main()
