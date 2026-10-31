@@ -126,6 +126,8 @@ To run Playwright browser E2E and visual verification tests:
 pytest tests/frontend -v
 ```
 
+Run `python scripts/capture_screenshots.py` to capture public pages from the demo server on port 8002. Images are saved to `../screenshots/`, outside the repository.
+
 ---
 
 ## 5. Demo Accounts

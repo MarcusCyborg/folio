@@ -1,8 +1,9 @@
 import os
 import time
+from pathlib import Path
 from playwright.sync_api import sync_playwright
 
-OUTPUT_DIR = os.path.join("docs", "screenshots")
+OUTPUT_DIR = Path(__file__).resolve().parents[2] / "screenshots"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 BASE_URL = "http://127.0.0.1:8002"

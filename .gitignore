@@ -20,4 +20,5 @@ pipeline_status.txt
 *.log
 .pgsql/
 .impeccable/
+/docs/screenshots/
 
