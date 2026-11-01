@@ -17,11 +17,13 @@ class AppException(HTTPException):
         code: str,
         message: str,
         fields: Optional[Dict[str, List[str]]] = None,
+        headers: Optional[Dict[str, str]] = None,
     ):
-        super().__init__(status_code=status_code, detail=message)
+        super().__init__(status_code=status_code, detail=message, headers=headers)
         self.code = code
         self.message = message
         self.fields = fields or {}
+        self.headers = headers
 
 def format_error_response(code: str, message: str, fields: Optional[Dict[str, List[str]]] = None) -> dict:
     return {
@@ -36,6 +38,7 @@ async def app_exception_handler(request: Request, exc: AppException):
     return JSONResponse(
         status_code=exc.status_code,
         content=format_error_response(exc.code, exc.message, exc.fields),
+        headers=exc.headers,
     )
 
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
@@ -55,6 +58,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     return JSONResponse(
         status_code=exc.status_code,
         content=format_error_response(code, message),
+        headers=getattr(exc, "headers", None),
     )
 
 async def validation_exception_handler(request: Request, exc: RequestValidationError):

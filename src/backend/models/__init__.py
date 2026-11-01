@@ -5,6 +5,7 @@ from src.backend.models.document import Document, DocumentTag, DocumentLike
 from src.backend.models.comment import Comment, CommentMention, Report
 from src.backend.models.event import InteractionLog, ViewEvent
 from src.backend.models.system import AuditLog, AppSetting
+from src.backend.models.rate_limit import RateLimitBucket
 
 __all__ = [
     "Base",
@@ -26,4 +27,5 @@ __all__ = [
     "ViewEvent",
     "AuditLog",
     "AppSetting",
+    "RateLimitBucket",
 ]

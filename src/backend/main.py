@@ -1,9 +1,10 @@
 import os
 from contextlib import asynccontextmanager
 from typing import Optional
-from fastapi import FastAPI, Query, Depends, Response, status
+from fastapi import FastAPI, Query, Depends, Response, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy import text
@@ -13,11 +14,13 @@ from src.backend.core.config import settings
 from src.backend.core.database import get_db
 from src.backend.core.exceptions import (
     AppException,
+    format_error_response,
     app_exception_handler,
     http_exception_handler,
     validation_exception_handler,
     unhandled_exception_handler,
 )
+from src.backend.core.rate_limit import RateLimitStoreUnavailableError
 from src.backend.core.middleware import (
     SecurityHeadersMiddleware,
     OriginVerificationMiddleware,
@@ -46,8 +49,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+async def rate_limit_store_unavailable_handler(request: Request, exc: RateLimitStoreUnavailableError):
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content=format_error_response(
+            "RATE_LIMIT_UNAVAILABLE",
+            "Rate limiting service is temporarily unavailable. Please try again later."
+        ),
+    )
+
 # Exception Handlers (including production unhandled 500 redaction)
 app.add_exception_handler(AppException, app_exception_handler)
+app.add_exception_handler(RateLimitStoreUnavailableError, rate_limit_store_unavailable_handler)
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, unhandled_exception_handler)

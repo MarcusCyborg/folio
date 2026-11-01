@@ -40,7 +40,10 @@ def get_session_by_token(db: Session, raw_token: str) -> Optional[SessionModel]:
     session_obj = db.query(SessionModel).filter(SessionModel.token_hash == token_hash).first()
     if not session_obj:
         return None
-    if session_obj.expires_at <= datetime.now(timezone.utc):
+    expires_at = session_obj.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= datetime.now(timezone.utc):
         db.delete(session_obj)
         db.flush()
         return None
