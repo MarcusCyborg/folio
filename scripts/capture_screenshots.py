@@ -6,7 +6,12 @@ import urllib.request
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
-DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "screenshots"
+# Ensure project root in sys.path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.backend.core.artifact_utils import get_artifact_context
 
 def wait_for_server(base_url: str, timeout_sec: float = 15.0) -> bool:
     """Polls server readiness endpoint until responsive or timeout."""
@@ -35,7 +40,12 @@ def launch_browser(playwright_ctx):
 
 def run(base_url: str = None, output_dir: str = None):
     base_url = (base_url or os.environ.get("FOLIO_BASE_URL") or "http://127.0.0.1:8002").rstrip("/")
-    out_path = Path(output_dir or os.environ.get("FOLIO_SCREENSHOT_DIR") or DEFAULT_OUTPUT_DIR).resolve()
+    if output_dir:
+        out_path = Path(output_dir).resolve()
+    elif os.environ.get("FOLIO_SCREENSHOT_DIR"):
+        out_path = Path(os.environ["FOLIO_SCREENSHOT_DIR"]).resolve()
+    else:
+        out_path = get_artifact_context().get_screenshots_dir("public")
     out_path.mkdir(parents=True, exist_ok=True)
 
     print(f"Starting screenshot capture targeting {base_url} -> {out_path}...")
@@ -146,7 +156,7 @@ def run(base_url: str = None, output_dir: str = None):
 def main():
     parser = argparse.ArgumentParser(description="Capture visual verification screenshots for Folio public pages")
     parser.add_argument("-u", "--base-url", default=None, help="Target application URL (default: http://127.0.0.1:8002)")
-    parser.add_argument("-o", "--output-dir", default=None, help="Output directory path (default: <repo_root>/screenshots/)")
+    parser.add_argument("-o", "--output-dir", default=None, help="Output directory path (default: test-results/artifacts/<worktree>/<commit>/<run_id>/screenshots/public)")
     args = parser.parse_args()
 
     run(base_url=args.base_url, output_dir=args.output_dir)

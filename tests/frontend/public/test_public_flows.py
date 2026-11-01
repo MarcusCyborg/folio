@@ -11,8 +11,12 @@ from playwright.sync_api import sync_playwright
 
 from src.backend.main import app
 
-SCREENSHOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../docs/verification/public"))
-os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+from src.backend.core.artifact_utils import get_artifact_context
+
+def get_public_screenshot_dir() -> str:
+    return str(get_artifact_context().get_screenshots_dir('public'))
+
+SCREENSHOT_DIR = get_public_screenshot_dir()
 
 PORT = 8888
 BASE_URL = f"http://127.0.0.1:{PORT}"

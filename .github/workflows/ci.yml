@@ -2,9 +2,10 @@ name: Folio CI
 
 on:
   push:
-    branches: [ main, "feature/**" ]
+    branches: [ main, "feature/**", "codex/**" ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, "feature/**", "codex/**" ]
+  workflow_dispatch:
 
 jobs:
   backend-and-database:
@@ -45,6 +46,7 @@ jobs:
         run: |
           source venv/bin/activate
           pip install -r requirements.txt -r requirements-dev.txt -c constraints.txt
+          pip check
 
       - name: Verify migration on clean database
         env:
@@ -53,32 +55,37 @@ jobs:
           source venv/bin/activate
           alembic upgrade head
 
-      - name: Verify database seeding idempotency (seed 2 times)
+      - name: Verify database seeding idempotency (seed 2 times with assertions)
         env:
+          APP_ENV: test
           DATABASE_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/folio
         run: |
           source venv/bin/activate
           echo "=== First Seed Pass ==="
           python scripts/seed_folio.py
-          echo "=== Second Seed Pass (Testing Idempotency) ==="
+          echo "=== Idempotency & Count Assertions ==="
+          pytest --noconftest tests/safety/test_seed_idempotency_asserts.py -v
+          echo "=== Second Seed Pass ==="
           python scripts/seed_folio.py
 
-      - name: Run automated backend test suite
+      - name: Run automated safety, security and backend test suite
         env:
-          APP_ENV: testing
+          APP_ENV: test
           APP_SECRET: test_secret_key_32bytes_minimum_for_tests_12345
           DATABASE_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/folio
           TEST_DATABASE_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/folio_test
         run: |
           source venv/bin/activate
-          pytest tests/backend -v --junitxml=test-results/junit-backend.xml
+          pytest tests/safety tests/security tests/backend -v --junitxml=test-results/junit-backend.xml
 
-      - name: Upload Backend Test Report
+      - name: Upload Backend Test Report & Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: junit-backend-results
-          path: test-results/junit-backend.xml
+          name: backend-test-results
+          path: |
+            test-results/junit-backend.xml
+            test-results/artifacts/
 
   frontend-e2e:
     name: Frontend E2E & Browser Verification
@@ -118,6 +125,7 @@ jobs:
         run: |
           source venv/bin/activate
           pip install -r requirements-browser.txt -c constraints.txt
+          pip check
 
       - name: Install Playwright Chromium with dependencies
         run: |
@@ -126,7 +134,7 @@ jobs:
 
       - name: Run Playwright Frontend E2E Test Suite
         env:
-          APP_ENV: testing
+          APP_ENV: test
           APP_SECRET: test_secret_key_32bytes_minimum_for_tests_12345
           DATABASE_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/folio
           TEST_DATABASE_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/folio_test
@@ -141,6 +149,4 @@ jobs:
           name: frontend-test-results
           path: |
             test-results/junit-frontend.xml
-            test-results/screenshots/
-            test-results/traces/
-            docs/verification/
+            test-results/artifacts/

@@ -99,7 +99,7 @@ Populate the database with the curated research fixture (fully idempotent):
 ```powershell
 python scripts/seed_folio.py
 ```
-*Output confirms: `Seed complete. Database now contains: 5 users, 162 published documents, 3 drafts, 6 categories, 154 tags.`*
+*Output confirms: `Seed complete. Database now contains: 5 users, 100 published documents, 3 drafts, 6 categories, 123 tags.`*
 Running `python scripts/seed_folio.py` multiple times is safe and produces identical state without duplicates.
 
 ### Step 5: Launch Development Server
@@ -128,37 +128,63 @@ Navigate to: **`http://127.0.0.1:8002`**
 
 ## 4. Automated Testing & Verification
 
-### Test Database Isolation & Guard
+### Test Database Isolation & Guard (Remediating IA-02)
 Tests do NOT touch or depend on manual seeds from your development database.
-- `tests/conftest.py` strictly validates `TEST_DATABASE_URL`:
-  - Enforces that the target database name contains `test`.
-  - Blocks connection if `TEST_DATABASE_URL` matches the production/development `DATABASE_URL`.
-  - Refuses to run against default root/system databases (`postgres`, `template0`, `template1`).
-- The test harness automatically creates `folio_test` if missing, cleans active connection locks, runs `alembic upgrade head`, seeds test fixtures idempotently, and wraps each test in a savepoint rollback (`create_savepoint`) for zero test-ordering dependencies.
-- Frontend browser fixtures use readiness polling against `/health` (replacing fixed sleeps) and Playwright's bundled Chromium with optional system browser channel fallbacks.
+- `src/backend/core/test_db_guard.py` strictly validates `TEST_DATABASE_URL`:
+  - Enforces that the target database name contains `test` and rejects protected database names (`postgres`, `folio`, `prod`, `master`, etc.).
+  - Evaluates effective driver connection arguments via `dialect.create_connect_args()` without opening network sockets.
+  - Strictly rejects target query parameter overrides (`?dbname=folio`, `host`, `port`, `service`, `options`, multi-host DSNs).
+  - Normalizes default port 5432 and loopback aliases (`localhost`, `127.0.0.1`, `127.0.0.2`, `::1`) against collision bypasses.
+  - Controls ambient libpq environment variables (`PGDATABASE`, `PGSERVICE`, `PGHOST`).
+  - Redacts credentials in all error messages—passwords are never leaked in tracebacks.
+- **Run Manifest & Selective Termination:**
+  - `TestRunManifest` assigns a unique run ID per test invocation (`run_<uuid>`) and strictly tracks owned databases.
+  - Pre-mutation connected identity check (`verify_connected_identity`) confirms database identity prior to executing any DDL.
+  - Selective backend termination (`selective_terminate_backends_sql`) only affects connections to the owned target database, never killing concurrent test runs.
+- **Savepoint & Browser State Isolation:**
+  - Backend tests wrap each test in a savepoint rollback (`create_savepoint`).
+  - Frontend browser tests utilize automatic database data state isolation (`isolate_frontend_test_database`), resetting mutated settings, demo user accounts, and test documents before and after each browser test, guaranteeing test execution order independence.
 
-### Running Backend Suite (58 Tests)
-```powershell
-pytest tests/backend -v --junitxml=test-results/junit-backend.xml
+### Unified Artifact Directory & Playwright Tracing (Remediating IA-07)
+All test outputs, visual verification screenshots, Playwright context failure traces, and JUnit reports are organized under a configurable, collision-free directory structure:
+```text
+test-results/artifacts/<worktree_or_checkout>/<commit_sha>/<run_id>/
+├── screenshots/
+│   ├── public/
+│   ├── admin/
+│   └── remediation/
+├── failures/
+│   ├── screenshots/
+│   └── traces/               # Playwright context trace archives (.zip)
+└── junit/
+    ├── junit-backend.xml
+    └── junit-frontend.xml
 ```
-All **58 automated backend tests** run against the dedicated test database (`folio_test`) and complete in ~16s.
+- **Tracked Evidence Protection:** Tests and capture scripts never write to `../screenshots` or `docs/verification`. Historical baseline PNG files remain strictly untouched.
+- **Playwright Tracing:** Tracing (`context.tracing.start(screenshots=True, snapshots=True, sources=True)`) runs automatically on every browser context; on failure, full trace archives are stopped and saved before context closes.
+- **Environment Overrides:** Artifact root can be configured via `FOLIO_ARTIFACT_ROOT`, `FOLIO_SCREENSHOT_DIR`, or the `--output-dir` CLI flag.
+
+### Running Backend Suite
+```powershell
+pytest tests/safety tests/security tests/backend -v --junitxml=test-results/junit-backend.xml
+```
+Executes pure safety guards, security regression, rate limiter tests, and backend API suites. When PostgreSQL is available, provisions an isolated test database (`folio_test_<run_id>`); when PostgreSQL is unreachable, live database tests report `BLOCKED_ENV` without hanging.
 
 ### Running Frontend Browser Suite (15 Tests)
 ```powershell
 pytest tests/frontend -v --junitxml=test-results/junit-frontend.xml
 ```
-All **15 automated Playwright browser tests** (covering Admin RBAC flows, Super Admin CRUD, Taxonomy, Moderation, SEO SERP simulator, and Public flows) complete in ~40s.
+Runs Playwright browser tests across viewports (`1280x720`, `1366x768`, `1440x900`, `1920x1080`, and laptop 125% zoom simulation). Screenshots and failure traces are saved to the isolated artifact directory.
 
 ### Configurable Public Screenshot Capture
-The screenshot capture script (`scripts/capture_screenshots.py`) supports configurable output paths and server targets to prevent cross-worktree file clobbering:
+The screenshot capture script (`scripts/capture_screenshots.py`) captures public views into the run-isolated artifact directory:
 ```powershell
-# Default outputs to local repo 'screenshots/' with readiness check against http://127.0.0.1:8002
+# Default outputs to test-results/artifacts/<worktree>/<commit>/<run_id>/screenshots/public
 python scripts/capture_screenshots.py
 
 # Or specify custom target and output directory:
-python scripts/capture_screenshots.py --output-dir screenshots/ --base-url http://127.0.0.1:8000
+python scripts/capture_screenshots.py --output-dir custom_screenshots/ --base-url http://127.0.0.1:8000
 ```
-Environment variable overrides are also supported: `FOLIO_BASE_URL` and `FOLIO_SCREENSHOT_DIR`.
 
 ---
 

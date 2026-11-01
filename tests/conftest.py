@@ -14,13 +14,15 @@ from fastapi.testclient import TestClient
 
 # Ensure project root in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.backend.core.config import settings
 from src.backend.core.database import get_db
 import src.backend.core.database as core_db
 from src.backend.main import app
 from src.backend.models.base import Base
+from src.backend.core.artifact_utils import get_artifact_context
 from src.backend.core.test_db_guard import (
     validate_test_database_safety,
     validate_test_database_target,
@@ -36,12 +38,10 @@ from src.backend.core.test_db_guard import (
     sanitize_ambient_libpq_env,
 )
 
-# Artifact directories for test failures
-TEST_RESULTS_DIR = PROJECT_ROOT / "test-results"
-FAILURE_SCREENSHOTS_DIR = TEST_RESULTS_DIR / "screenshots"
-FAILURE_TRACES_DIR = TEST_RESULTS_DIR / "traces"
-FAILURE_SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
-FAILURE_TRACES_DIR.mkdir(parents=True, exist_ok=True)
+# Unified artifact context for this test session (remediating IA-07)
+artifact_ctx = get_artifact_context()
+FAILURE_SCREENSHOTS_DIR = artifact_ctx.get_failures_dir()
+FAILURE_TRACES_DIR = artifact_ctx.get_traces_dir()
 
 # Sanitize ambient libpq environment variables to prevent driver target redirection
 sanitize_ambient_libpq_env()
@@ -62,6 +62,20 @@ core_db.engine = test_engine
 core_db.SessionLocal = TestingSessionLocal
 
 
+def is_database_reachable(db_url_str: str, timeout_sec: float = 2.0) -> bool:
+    """Fast check whether the database server is responding within timeout_sec."""
+    try:
+        url = make_url(db_url_str)
+        admin_url = url.set(database="postgres")
+        engine = create_engine(admin_url, connect_args={"connect_timeout": timeout_sec})
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        engine.dispose()
+        return True
+    except Exception:
+        return False
+
+
 def ensure_test_database_exists(db_url_str: str):
     """
     Connects to administrative database ('postgres') and provisions the test DB if it does not exist.
@@ -75,7 +89,7 @@ def ensure_test_database_exists(db_url_str: str):
         raise TestDatabaseSafetyError("No target database specified in test URL.")
 
     admin_url = url.set(database="postgres")
-    admin_engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+    admin_engine = create_engine(admin_url, isolation_level="AUTOCOMMIT", connect_args={"connect_timeout": 2})
     try:
         with admin_engine.connect() as conn:
             exists = conn.execute(
@@ -104,7 +118,14 @@ def prepare_test_database():
     """
     Ensures test database exists, resets public schema safely with connected identity check,
     runs Alembic migrations to head, and seeds clean baseline fixtures. Disposes connections on teardown.
+    When PostgreSQL test instance is unavailable, skips live DB tests reporting BLOCKED_ENV.
     """
+    if not is_database_reachable(test_db_url):
+        pytest.skip(
+            f"BLOCKED_ENV: PostgreSQL test instance at {target_validation.redacted_url_str} is not reachable. Live database fixtures skipped.",
+            allow_module_level=True,
+        )
+
     ensure_test_database_exists(test_db_url)
 
     # 1. Reset schema safely with pre-mutation connected identity check (never auto-drops on mismatch)
@@ -142,6 +163,65 @@ def prepare_test_database():
     # Safe teardown
     print("[conftest] Tearing down test database connections...")
     test_engine.dispose()
+
+
+def reset_browser_test_data(engine):
+    """
+    Restores database state to pristine baseline after browser tests.
+    Guarantees browser tests do not leak mutated state (settings, comments, reports, users, documents)
+    to subsequent tests regardless of test execution order.
+    """
+    import json
+    from scripts.seed_folio import DEFAULT_SETTINGS, ROLE_PERMISSIONS_DEFAULTS, DEMO_USERS
+
+    try:
+        with engine.begin() as conn:
+            # 1. Reset AppSettings to default
+            for k, v in DEFAULT_SETTINGS.items():
+                val_str = json.dumps(v)
+                conn.execute(text("UPDATE app_settings SET value = :v WHERE key = :k"), {"k": k, "v": val_str})
+
+            # 2. Reset DEMO_USERS attributes (active=True, commenting_suspended_until=None)
+            conn.execute(text(
+                "UPDATE users SET commenting_suspended_until = NULL, is_active = true "
+                "WHERE username IN ('admin', 'content_mgr', 'moderator', 'seo_specialist', 'reader')"
+            ))
+            for _, uname, _, rkey, _ in DEMO_USERS:
+                conn.execute(text("UPDATE users SET role_key = :rkey WHERE username = :uname"), {"rkey": rkey, "uname": uname})
+            # Delete non-demo users created during tests
+            conn.execute(text(
+                "DELETE FROM users WHERE username NOT IN ('admin', 'content_mgr', 'moderator', 'seo_specialist', 'reader')"
+            ))
+
+            # 3. Clean up test documents and document_tags created by tests
+            conn.execute(text(
+                "DELETE FROM document_tags WHERE document_id IN (SELECT id FROM documents WHERE title LIKE 'Quantum%')"
+            ))
+            conn.execute(text("DELETE FROM documents WHERE title LIKE 'Quantum%'"))
+
+            # 4. Clean up test categories created by tests
+            conn.execute(text("DELETE FROM categories WHERE slug LIKE 'quantum-tech-%'"))
+
+            # 5. Clean up interaction tables
+            conn.execute(text("DELETE FROM reports"))
+            conn.execute(text("DELETE FROM sessions WHERE user_id IS NULL"))
+    except Exception as e:
+        print(f"[conftest] Note on reset_browser_test_data: {e}")
+
+
+@pytest.fixture(autouse=True)
+def isolate_frontend_test_database(request):
+    """
+    Auto-use fixture ensuring isolated clean database state before and after every frontend test.
+    Guarantees test execution order independence.
+    """
+    is_frontend = "frontend" in str(request.node.fspath)
+    if is_frontend and is_database_reachable(test_db_url):
+        reset_browser_test_data(test_engine)
+        yield
+        reset_browser_test_data(test_engine)
+    else:
+        yield
 
 
 @pytest.fixture
@@ -233,6 +313,7 @@ def browser_instance():
     Centralized browser launcher:
     - Primary: Playwright's installed Chromium.
     - Optional: System browser channels ('chrome', 'msedge') if configured or available.
+    - Tracing: Automatically instruments newly created contexts with tracing.start().
     """
     from playwright.sync_api import sync_playwright
 
@@ -249,6 +330,21 @@ def browser_instance():
     if browser is None:
         browser = p.chromium.launch(headless=True)
 
+    # Instrument new_context to start Playwright tracing on every context
+    original_new_context = browser.new_context
+
+    def context_factory(*args, **kwargs):
+        ctx = original_new_context(*args, **kwargs)
+        try:
+            ctx.tracing.start(screenshots=True, snapshots=True, sources=True)
+            ctx._folio_tracing_active = True
+        except Exception as e:
+            print(f"[conftest] Note: could not start tracing: {e}")
+            ctx._folio_tracing_active = False
+        return ctx
+
+    browser.new_context = context_factory
+
     yield browser
 
     browser.close()
@@ -261,15 +357,34 @@ def pytest_runtest_makereport(item, call):
     outcome = yield
     report = outcome.get_result()
 
-    if report.when == "call" and report.failed:
-        # Check if browser_instance or page is in fixtures
+    if report.when == "call":
         browser = item.funcargs.get("browser_instance")
         if browser:
-            for c_idx, context in enumerate(browser.contexts):
-                for p_idx, page in enumerate(context.pages):
-                    screenshot_path = FAILURE_SCREENSHOTS_DIR / f"{item.name}_{c_idx}_{p_idx}_failed.png"
-                    try:
-                        page.screenshot(path=str(screenshot_path), full_page=True)
-                        print(f"\n[Artifact] Saved failure screenshot to: {screenshot_path}")
-                    except Exception as e:
-                        print(f"\n[Artifact] Failed to save screenshot: {e}")
+            if report.failed:
+                # Capture screenshots and save traces for all active contexts
+                for c_idx, context in enumerate(browser.contexts):
+                    for p_idx, page in enumerate(context.pages):
+                        screenshot_path = artifact_ctx.get_failure_screenshot_path(item.name, p_idx)
+                        try:
+                            page.screenshot(path=str(screenshot_path), full_page=True)
+                            print(f"\n[Artifact] Saved failure screenshot to: {screenshot_path}")
+                        except Exception as e:
+                            print(f"\n[Artifact] Failed to save screenshot: {e}")
+
+                    if getattr(context, "_folio_tracing_active", False):
+                        trace_path = artifact_ctx.get_failure_trace_path(item.name, c_idx)
+                        try:
+                            context.tracing.stop(path=str(trace_path))
+                            context._folio_tracing_active = False
+                            print(f"\n[Artifact] Saved failure trace to: {trace_path}")
+                        except Exception as e:
+                            print(f"\n[Artifact] Failed to save trace: {e}")
+            else:
+                # Passed: stop tracing without saving to conserve disk space
+                for context in browser.contexts:
+                    if getattr(context, "_folio_tracing_active", False):
+                        try:
+                            context.tracing.stop()
+                            context._folio_tracing_active = False
+                        except Exception:
+                            pass
