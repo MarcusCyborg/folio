@@ -150,9 +150,29 @@ class IndexWorker:
                         "updated_at": (doc.updated_at or now).isoformat(),
                     },
                 )
+                if (storage.postings_dir / "index_stats.json").exists():
+                    from src.backend.search.index import InvertedIndex
+                    inv_idx = InvertedIndex.load(storage.postings_dir)
+                    combined_text = f"{doc.title} {doc.summary} {doc.content}".strip()
+                    tag_ids = [dt.tag_id for dt in doc.document_tags] if doc.document_tags else []
+                    inv_idx.upsert_document(
+                        doc.id,
+                        text=combined_text,
+                        title=doc.title,
+                        category_id=doc.category_id,
+                        tag_ids=tag_ids,
+                        created_at=doc.created_at.isoformat() if doc.created_at else None,
+                        status="published",
+                    )
+                    inv_idx.save(storage.postings_dir)
             else:
                 # Delete operation, draft status, or soft-deleted doc
                 storage.delete_document(job.document_id)
+                if (storage.postings_dir / "index_stats.json").exists():
+                    from src.backend.search.index import InvertedIndex
+                    inv_idx = InvertedIndex.load(storage.postings_dir)
+                    inv_idx.delete_document(job.document_id)
+                    inv_idx.save(storage.postings_dir)
 
             # Mark completed
             job.state = "completed"

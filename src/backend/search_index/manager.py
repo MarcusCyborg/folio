@@ -110,6 +110,11 @@ class GenerationManager:
                     },
                 )
 
+            # Build Inverted Index postings for this generation (P04)
+            from src.backend.search.builder import IndexBuilder
+            index_builder = IndexBuilder()
+            inverted_index = index_builder.build_from_documents(docs, generation_id=gen_id)
+
             if sim_fail_at == "build":
                 raise IndexBuildError("Simulated index build failure")
 
@@ -138,8 +143,23 @@ class GenerationManager:
                             "updated_at": (current_doc.updated_at or now).isoformat(),
                         },
                     )
+                    combined_text = f"{current_doc.title} {current_doc.summary} {current_doc.content}".strip()
+                    tag_ids = [dt.tag_id for dt in current_doc.document_tags] if current_doc.document_tags else []
+                    inverted_index.upsert_document(
+                        current_doc.id,
+                        text=combined_text,
+                        title=current_doc.title,
+                        category_id=current_doc.category_id,
+                        tag_ids=tag_ids,
+                        created_at=current_doc.created_at.isoformat() if current_doc.created_at else None,
+                        status="published",
+                    )
                 else:
                     storage.delete_document(job.document_id)
+                    inverted_index.delete_document(job.document_id)
+
+            # Persist inverted index postings for verified generation
+            inverted_index.save(storage.postings_dir)
 
             if sim_fail_at == "verify":
                 raise IndexVerificationError("Simulated index verification failure")
