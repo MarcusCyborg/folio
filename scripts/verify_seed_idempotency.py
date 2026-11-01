@@ -23,6 +23,7 @@ from scripts.seed_folio import run_seed
 def verify_seed(engine):
     fixture = [json.loads(line) for line in (PROJECT_ROOT / "fixtures/folio/documents.jsonl").read_text(encoding="utf-8").splitlines() if line]
     expected_ids = {doc["id"] for doc in fixture}
+    expected_mapping = {doc["source_url"]: doc["id"] for doc in fixture}
 
     def counts(db):
         return (db.query(User).count(), db.query(Document).filter_by(status="published").count(),
@@ -32,6 +33,7 @@ def verify_seed(engine):
     with Session(engine) as db:
         assert counts(db) == (5, 100, 3, 6, 123), counts(db)
         assert {d.id for d in db.query(Document).all()} == expected_ids
+        assert {d.source_url: d.id for d in db.query(Document).all()} == expected_mapping
         first_audits = db.query(AuditLog).count()
         sample_id = fixture[0]["id"]
         db.get(Document, sample_id).summary = "LIVE_POSTGRES_PRESERVED_EDIT"
@@ -41,6 +43,7 @@ def verify_seed(engine):
     with Session(engine) as db:
         assert counts(db) == (5, 100, 3, 6, 123), counts(db)
         assert {d.id for d in db.query(Document).all()} == expected_ids
+        assert {d.source_url: d.id for d in db.query(Document).all()} == expected_mapping
         assert db.get(Document, sample_id).summary == "LIVE_POSTGRES_PRESERVED_EDIT"
         assert db.get(AppSetting, "comments_enabled").value is False
         assert db.query(AuditLog).count() > first_audits

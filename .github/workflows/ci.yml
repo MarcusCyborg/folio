@@ -73,7 +73,7 @@ jobs:
           FOLIO_TEST_ADMIN_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/postgres
         run: |
           source venv/bin/activate
-          pytest tests/safety tests/security tests/backend -v --junitxml=test-results/junit-backend.xml
+          pytest tests/safety tests/security tests/backend --ignore=tests/safety/test_artifact_isolation.py -v --junitxml=test-results/junit-backend.xml
 
       - name: Upload Backend Test Report & Artifacts
         if: always()
@@ -138,7 +138,7 @@ jobs:
           FOLIO_TEST_ADMIN_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/postgres
         run: |
           source venv/bin/activate
-          pytest tests/frontend -v --junitxml=test-results/junit-frontend.xml
+          pytest tests/frontend tests/safety/test_artifact_isolation.py -v --junitxml=test-results/junit-frontend.xml
 
       - name: Upload Frontend Test Results & Failure Artifacts
         if: always()

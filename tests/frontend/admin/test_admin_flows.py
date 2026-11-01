@@ -167,7 +167,8 @@ def test_super_admin_full_documents_crud_and_dirty_guard(live_server, browser_in
     # 7. Edit document and Publish
     page.click(f"text={doc_title}")
     page.wait_for_selector("#docEditorForm")
-    page.wait_for_selector("#editCategory option", state="attached")
+    # The form skeleton appears before async document/taxonomy loading completes.
+    page.wait_for_function("title => document.querySelector('#editTitle')?.value === title && document.querySelector('#editCategory')?.value && document.querySelector('#editContent')?.value", arg=doc_title)
     page.click("#publishDocBtn")
     page.wait_for_url(f"{BASE_URL}/#/admin/documents")
     page.wait_for_selector("table")
