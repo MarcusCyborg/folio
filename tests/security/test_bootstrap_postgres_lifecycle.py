@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.orm import Session
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -39,6 +40,7 @@ from src.backend.core.test_db_guard import (
     selective_terminate_backends_sql,
 )
 from src.backend.core.security import verify_password
+from src.backend.core.session import create_session, get_session_by_token
 from src.backend.models.auth import User, Role, SessionModel
 from src.backend.models.system import AuditLog
 
@@ -80,41 +82,61 @@ class TestLivePostgresBootstrapLifecycle:
         # 1. Provision fresh test database
         target_db_url = provision_test_database(ADMIN_URL, manifest, requested_dbname=run_db_name)
 
-        # 2. Run Alembic upgrade head
-        from alembic.config import Config
-        from alembic import command
-        alembic_ini_path = PROJECT_ROOT / "alembic.ini"
-        alembic_cfg = Config(str(alembic_ini_path))
-        alembic_cfg.set_main_option("sqlalchemy.url", target_db_url)
-        alembic_cfg.set_main_option("script_location", str(PROJECT_ROOT / "alembic"))
-        command.upgrade(alembic_cfg, "head")
+        engine = create_engine(target_db_url)
+        try:
+            # 2. Run Alembic upgrade head
+            from alembic.config import Config
+            from alembic import command
+            alembic_ini_path = PROJECT_ROOT / "alembic.ini"
+            alembic_cfg = Config(str(alembic_ini_path))
+            alembic_cfg.set_main_option("sqlalchemy.url", target_db_url)
+            alembic_cfg.set_main_option("script_location", str(PROJECT_ROOT / "alembic"))
+            import argparse
+            alembic_cfg.cmd_opts = argparse.Namespace(x=[f"db_url={target_db_url}"])
+            command.upgrade(alembic_cfg, "head")
 
-        # Yield context
-        yield {
-            "manifest": manifest,
-            "db_name": run_db_name,
-            "db_url": target_db_url,
-        }
+            # Yield context
+            yield {
+                "manifest": manifest,
+                "db_name": run_db_name,
+                "db_url": target_db_url,
+                "engine": engine,
+            }
 
-        # 3. Teardown
-        safe_teardown_test_database(ADMIN_URL, manifest, run_db_name)
+        finally:
+            engine.dispose()
+            safe_teardown_test_database(ADMIN_URL, manifest, run_db_name)
 
     def test_live_cli_create_rerun_rotate_and_negative_matrix(self, live_pg_db):
         """End-to-end CLI subprocess execution on migrated PostgreSQL without manual seed."""
         target_url = live_pg_db["db_url"]
         cli_path = str(PROJECT_ROOT / "scripts" / "bootstrap_admin.py")
 
+        engine = live_pg_db["engine"]
+
+        def snapshot():
+            with engine.connect() as conn:
+                return tuple(conn.execute(text(sql)).fetchall() for sql in (
+                    "SELECT id,email,username,password_hash,role_key,is_active FROM users ORDER BY id",
+                    "SELECT id,token_hash,user_id FROM sessions ORDER BY id",
+                    "SELECT id,action,entity_id FROM audit_logs ORDER BY id",
+                ))
+
         def run_cli(args: list, password: str) -> subprocess.CompletedProcess:
+            before = snapshot()
             env = os.environ.copy()
             env["DATABASE_URL"] = target_url
             env["ADMIN_BOOTSTRAP_PASSWORD"] = password
             env["PYTHONPATH"] = str(PROJECT_ROOT)
-            return subprocess.run(
+            result = subprocess.run(
                 [sys.executable, cli_path, "--non-interactive"] + args,
                 capture_output=True,
                 text=True,
                 env=env,
             )
+            if result.returncode:
+                assert snapshot() == before, result.stderr
+            return result
 
         # 1. Create Initial Super Admin
         create_res = run_cli([
@@ -126,7 +148,6 @@ class TestLivePostgresBootstrapLifecycle:
         assert "[SUCCESS] Initial Super Admin account" in create_res.stdout
 
         # Verify DB state
-        engine = create_engine(target_url)
         with Session(engine) as session:
             admin = session.query(User).filter(User.username == "pg_admin").first()
             assert admin is not None
@@ -140,6 +161,9 @@ class TestLivePostgresBootstrapLifecycle:
             audit = session.query(AuditLog).filter(AuditLog.entity_id == admin_id).first()
             assert audit is not None
             assert audit.action == "auth.admin_bootstrap_created"
+            _, old_token = create_session(session, user=admin)
+            create_session(session, user=admin)
+            session.commit()
 
         # 2. Duplicate Create without --rotate (must fail with exit code 2)
         dup_res = run_cli([
@@ -163,6 +187,22 @@ class TestLivePostgresBootstrapLifecycle:
             assert admin.id == admin_id
             assert admin.role_key == "super_admin"
             assert verify_password(STRONG_BOOT_PWD_2, admin.password_hash)
+            assert session.query(SessionModel).filter(SessionModel.user_id == admin_id).count() == 0
+            assert get_session_by_token(session, old_token) is None
+
+            # Real member, disabled admin and cross-account identity collisions.
+            session.add(User(email="pg_member@folio.local", username="pg_member", display_name="Member", password_hash=admin.password_hash, role_key="member", is_active=True))
+            session.add(User(email="pg_disabled@folio.local", username="pg_disabled", display_name="Disabled", password_hash=admin.password_hash, role_key="super_admin", is_active=False))
+            session.commit()
+
+        for email, username in (
+            ("pg_member@folio.local", "pg_member"),
+            ("pg_disabled@folio.local", "pg_disabled"),
+            ("pg_admin@folio.local", "pg_member"),
+            ("missing@folio.local", "missing"),
+        ):
+            rejected = run_cli(["--email", email, "--username", username, "--rotate"], STRONG_BOOT_PWD_1)
+            assert rejected.returncode == 1, rejected.stdout
 
         # 4. Negative Matrix: Email Mismatch (must exit 1 without mutation)
         mismatch_email_res = run_cli([

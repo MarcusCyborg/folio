@@ -254,6 +254,8 @@ class TestTestRunManifestAndOwnership:
         mock_engine.connect.return_value.__enter__.return_value = mock_conn
         # Database already exists in pg_database (scalar returns 1)
         mock_conn.execute.return_value.scalar.return_value = 1
+        mock_conn.execute.return_value.fetchone.return_value = ("postgres", "review", "127.0.0.1", 5432)
+        mock_engine.dialect.create_connect_args.return_value = ((), {"dbname": "folio_test_existing"})
 
         with patch("src.backend.core.test_db_guard.create_engine", return_value=mock_engine):
             with pytest.raises(UnownedDatabaseError) as exc_info:
@@ -409,6 +411,7 @@ class TestR045RegressionSafeguards:
             mock_engine = MagicMock()
             mock_conn = MagicMock()
             mock_engine.connect.return_value.__enter__.return_value = mock_conn
+            mock_conn.execute.return_value.fetchone.return_value = ("postgres", "tester", "127.0.0.1", 5432)
             mock_conn.execute.return_value.scalar.return_value = 0  # does not exist
             mock_engine.dialect.create_connect_args.return_value = ((), {"dbname": target_name})
 
@@ -437,3 +440,31 @@ class TestR045RegressionSafeguards:
             # Verifies CREATE DATABASE was executed with the expected target name
             executed_sql = [str(call_arg[0][0]) for call_arg in mock_conn.execute.call_args_list if call_arg[0]]
             assert any(f'CREATE DATABASE "{target_name}"' in s for s in executed_sql)
+
+
+def test_connected_server_port_mismatch_rejected_before_mutation():
+    target = validate_test_database_target("postgresql+psycopg://tester@127.0.0.1:55463/folio_test_identity")
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.return_value = ("folio_test_identity", "tester", "127.0.0.1", 5432)
+    with pytest.raises(ConnectedIdentityMismatchError, match="server endpoint mismatch"):
+        verify_connected_identity(conn, "folio_test_identity", target)
+    assert conn.execute.call_count == 1
+
+
+def test_manifest_endpoint_mismatch_cannot_teardown_same_name():
+    manifest = TestRunManifest.create()
+    target = validate_test_database_target("postgresql+psycopg://tester@127.0.0.1:55463/folio_test_identity")
+    manifest.register_owned("folio_test_identity", target)
+    with pytest.raises(UnownedDatabaseError, match="endpoint"):
+        safe_teardown_test_database("postgresql+psycopg://tester@127.0.0.1:5432/postgres", manifest, "folio_test_identity")
+
+    with pytest.raises(UnownedDatabaseError, match="endpoint"):
+        safe_teardown_test_database("postgresql+psycopg://tester@127.0.0.2:55463/postgres", manifest, "folio_test_identity")
+
+
+def test_provision_rejects_driver_override_before_create():
+    from unittest.mock import patch
+    with patch("src.backend.core.test_db_guard.create_engine") as factory:
+        with pytest.raises(TestDatabaseSafetyError, match="query override"):
+            provision_test_database("postgresql+psycopg://tester@127.0.0.1/postgres?dbname=folio", TestRunManifest.create(), "folio_test_redirect")
+        factory.assert_not_called()

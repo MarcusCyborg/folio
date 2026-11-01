@@ -51,7 +51,10 @@ session_manifest = TestRunManifest.create()
 
 # Validate test database target using pure effective-driver-target safety guard
 target_validation = validate_test_database_target(settings.TEST_DATABASE_URL, settings.DATABASE_URL)
-test_db_url = target_validation.test_url_str
+test_db_url = make_url(target_validation.test_url_str).set(
+    database=session_manifest.generate_db_name(target_validation.effective_database)
+).render_as_string(hide_password=False)
+target_validation = validate_test_database_target(test_db_url, settings.DATABASE_URL)
 # Database ownership is ONLY registered after successful CREATE DATABASE in ensure_test_database_exists
 
 test_engine = create_engine(test_db_url, poolclass=pool.NullPool)
@@ -84,33 +87,10 @@ def ensure_test_database_exists(db_url_str: str):
     to reject unowned DB mutation.
     """
     url = make_url(db_url_str)
-    target_db = url.database
-    if not target_db:
-        raise TestDatabaseSafetyError("No target database specified in test URL.")
-
-    admin_url = url.set(database="postgres")
-    admin_engine = create_engine(admin_url, isolation_level="AUTOCOMMIT", connect_args={"connect_timeout": 2})
-    try:
-        with admin_engine.connect() as conn:
-            exists = conn.execute(
-                text("SELECT 1 FROM pg_database WHERE datname = :name"),
-                {"name": target_db}
-            ).scalar()
-            if not exists:
-                print(f"[conftest] Auto-creating test database '{target_db}'...")
-                conn.execute(text(f'CREATE DATABASE "{target_db}"'))
-                session_manifest.register_owned(target_db)
-                print(f"[conftest] Test database '{target_db}' created successfully.")
-            else:
-                # If target already exists prior to run, do not claim ownership or terminate backends
-                if session_manifest.is_owned(target_db):
-                    conn.execute(text(selective_terminate_backends_sql(target_db)))
-                else:
-                    print(f"[conftest] Database '{target_db}' already exists and is not owned by run {session_manifest.run_id}.")
-    except Exception as e:
-        print(f"[conftest] Note on auto-create test DB: {e}")
-    finally:
-        admin_engine.dispose()
+    return provision_test_database(
+        url.set(database="postgres").render_as_string(hide_password=False),
+        session_manifest, requested_dbname=url.database,
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -128,85 +108,66 @@ def prepare_test_database():
 
     ensure_test_database_exists(test_db_url)
 
-    # 1. Reset schema safely with pre-mutation connected identity check (never auto-drops on mismatch)
-    safe_reset_test_schema(test_engine, session_manifest, target_validation.effective_database)
-
-    # 2. Run alembic upgrade head
-    import argparse
-    from alembic.config import Config
-    from alembic import command
-    alembic_ini_path = PROJECT_ROOT / "alembic.ini"
-    alembic_cfg = Config(str(alembic_ini_path))
-    alembic_cfg.set_main_option("sqlalchemy.url", test_db_url)
-    alembic_cfg.set_main_option("script_location", str(PROJECT_ROOT / "alembic"))
-    alembic_cfg.cmd_opts = argparse.Namespace(x=[f"db_url={test_db_url}"])
-    old_db_url_env = os.environ.get("DATABASE_URL")
-    os.environ["DATABASE_URL"] = test_db_url
-    print("[conftest] Running 'alembic upgrade head' on test database...")
     try:
-        command.upgrade(alembic_cfg, "head")
+        # 1. Reset schema safely with pre-mutation connected identity check (never auto-drops on mismatch)
+        safe_reset_test_schema(test_engine, session_manifest, target_validation.effective_database)
+
+        # 2. Run alembic upgrade head
+        import argparse
+        from alembic.config import Config
+        from alembic import command
+        alembic_ini_path = PROJECT_ROOT / "alembic.ini"
+        alembic_cfg = Config(str(alembic_ini_path))
+        alembic_cfg.set_main_option("sqlalchemy.url", test_db_url)
+        alembic_cfg.set_main_option("script_location", str(PROJECT_ROOT / "alembic"))
+        alembic_cfg.cmd_opts = argparse.Namespace(x=[f"db_url={test_db_url}"])
+        old_db_url_env = os.environ.get("DATABASE_URL")
+        os.environ["DATABASE_URL"] = test_db_url
+        print("[conftest] Running 'alembic upgrade head' on test database...")
+        try:
+            command.upgrade(alembic_cfg, "head")
+        finally:
+            if old_db_url_env is not None:
+                os.environ["DATABASE_URL"] = old_db_url_env
+            else:
+                os.environ.pop("DATABASE_URL", None)
+        print("[conftest] Alembic migrations completed successfully.")
+
+        # 3. Seed baseline fixtures idempotently
+        from scripts.seed_folio import run_seed
+        print("[conftest] Seeding test database fixtures...")
+        run_seed(target=test_engine)
+        print("[conftest] Test database seeded and ready.")
+
+        yield
     finally:
-        if old_db_url_env is not None:
-            os.environ["DATABASE_URL"] = old_db_url_env
-        else:
-            os.environ.pop("DATABASE_URL", None)
-    print("[conftest] Alembic migrations completed successfully.")
-
-    # 3. Seed baseline fixtures idempotently
-    from scripts.seed_folio import run_seed
-    print("[conftest] Seeding test database fixtures...")
-    run_seed(target=test_engine)
-    print("[conftest] Test database seeded and ready.")
-
-    yield
-
-    # Safe teardown
-    print("[conftest] Tearing down test database connections...")
-    test_engine.dispose()
+        test_engine.dispose()
+        if session_manifest.is_owned(target_validation.effective_database):
+            safe_teardown_test_database(
+                make_url(test_db_url).set(database="postgres").render_as_string(hide_password=False),
+                session_manifest, target_validation.effective_database,
+            )
 
 
-def reset_browser_test_data(engine):
+def reset_browser_test_data(engine, manifest=None):
     """
     Restores database state to pristine baseline after browser tests.
     Guarantees browser tests do not leak mutated state (settings, comments, reports, users, documents)
     to subsequent tests regardless of test execution order.
     """
-    import json
-    from scripts.seed_folio import DEFAULT_SETTINGS, ROLE_PERMISSIONS_DEFAULTS, DEMO_USERS
-
-    try:
-        with engine.begin() as conn:
-            # 1. Reset AppSettings to default
-            for k, v in DEFAULT_SETTINGS.items():
-                val_str = json.dumps(v)
-                conn.execute(text("UPDATE app_settings SET value = :v WHERE key = :k"), {"k": k, "v": val_str})
-
-            # 2. Reset DEMO_USERS attributes (active=True, commenting_suspended_until=None)
-            conn.execute(text(
-                "UPDATE users SET commenting_suspended_until = NULL, is_active = true "
-                "WHERE username IN ('admin', 'content_mgr', 'moderator', 'seo_specialist', 'reader')"
-            ))
-            for _, uname, _, rkey, _ in DEMO_USERS:
-                conn.execute(text("UPDATE users SET role_key = :rkey WHERE username = :uname"), {"rkey": rkey, "uname": uname})
-            # Delete non-demo users created during tests
-            conn.execute(text(
-                "DELETE FROM users WHERE username NOT IN ('admin', 'content_mgr', 'moderator', 'seo_specialist', 'reader')"
-            ))
-
-            # 3. Clean up test documents and document_tags created by tests
-            conn.execute(text(
-                "DELETE FROM document_tags WHERE document_id IN (SELECT id FROM documents WHERE title LIKE 'Quantum%')"
-            ))
-            conn.execute(text("DELETE FROM documents WHERE title LIKE 'Quantum%'"))
-
-            # 4. Clean up test categories created by tests
-            conn.execute(text("DELETE FROM categories WHERE slug LIKE 'quantum-tech-%'"))
-
-            # 5. Clean up interaction tables
-            conn.execute(text("DELETE FROM reports"))
-            conn.execute(text("DELETE FROM sessions WHERE user_id IS NULL"))
-    except Exception as e:
-        print(f"[conftest] Note on reset_browser_test_data: {e}")
+    # Browser requests commit across sessions. Restore all application rows in FK order,
+    # rather than deleting a hand-picked subset and leaking comments, settings or counters.
+    from scripts.seed_folio import run_seed
+    with engine.begin() as conn:
+        if engine.dialect.name == "postgresql":
+            target = validate_test_database_target(engine.url.render_as_string(hide_password=False))
+            if manifest is None or not manifest.is_owned(target.effective_database):
+                raise UnownedDatabaseError("Browser reset requires an owned run database.")
+            manifest.require_endpoint(target.effective_database, target)
+            verify_connected_identity(conn, target.effective_database, target)
+        for table in reversed(Base.metadata.sorted_tables):
+            conn.execute(table.delete())
+    run_seed(target=engine)
 
 
 @pytest.fixture(autouse=True)
@@ -217,9 +178,16 @@ def isolate_frontend_test_database(request):
     """
     is_frontend = "frontend" in str(request.node.fspath)
     if is_frontend and is_database_reachable(test_db_url):
-        reset_browser_test_data(test_engine)
+        stop_live_server()
+        reset_browser_test_data(test_engine, session_manifest)
+        start_live_server()
         yield
-        reset_browser_test_data(test_engine)
+        browser = request.node.funcargs.get("browser_instance")
+        if browser:
+            for context in browser.contexts:
+                context.close()
+        stop_live_server()
+        reset_browser_test_data(test_engine, session_manifest)
     else:
         yield
 
@@ -278,33 +246,44 @@ def wait_for_server_readiness(base_url: str, timeout_sec: float = 15.0) -> bool:
     return False
 
 
-@pytest.fixture(scope="session")
-def live_server(prepare_test_database):
-    """
-    Centralized frontend test server fixture.
-    Runs FastAPI with Uvicorn on an available port, verifies readiness via polling,
-    and cleanly tears down on session completion.
-    """
-    port = int(os.environ.get("FOLIO_TEST_PORT", 0)) or get_free_port()
-    base_url = f"http://127.0.0.1:{port}"
+_live_server_state = {}
 
-    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
+
+def start_live_server():
+    state = _live_server_state
+    if not state or state.get("running"):
+        return
+    config = uvicorn.Config(app, host="127.0.0.1", port=state["port"], log_level="error")
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
+    state.update(server=server, thread=thread, running=True)
     thread.start()
+    if not wait_for_server_readiness(state["base_url"]):
+        stop_live_server()
+        raise RuntimeError("Live test server failed readiness polling")
 
-    ready = wait_for_server_readiness(base_url, timeout_sec=15.0)
-    if not ready:
-        server.should_exit = True
-        thread.join(timeout=2.0)
-        raise RuntimeError(f"Live server at {base_url} failed readiness health check within 15 seconds.")
 
-    print(f"\n[conftest] Live test server ready at {base_url}")
-    yield base_url
+def stop_live_server():
+    state = _live_server_state
+    if state.get("running"):
+        state["server"].should_exit = True
+        state["thread"].join(timeout=10)
+        if state["thread"].is_alive():
+            raise RuntimeError("Server did not drain; refusing browser database reset")
+        state["running"] = False
 
-    print(f"\n[conftest] Shutting down live test server at {base_url}...")
-    server.should_exit = True
-    thread.join(timeout=3.0)
+
+@pytest.fixture(scope="session")
+def live_server(prepare_test_database):
+    port = int(os.environ.get("FOLIO_TEST_PORT", 0)) or get_free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    _live_server_state.update(port=port, base_url=base_url, running=False)
+    start_live_server()
+    try:
+        yield base_url
+    finally:
+        stop_live_server()
+        _live_server_state.clear()
 
 
 @pytest.fixture(scope="session")

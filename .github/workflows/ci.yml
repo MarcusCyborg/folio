@@ -59,14 +59,10 @@ jobs:
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/folio
+          FOLIO_TEST_ADMIN_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/postgres
         run: |
           source venv/bin/activate
-          echo "=== First Seed Pass ==="
-          python scripts/seed_folio.py
-          echo "=== Idempotency & Count Assertions ==="
-          pytest --noconftest tests/safety/test_seed_idempotency_asserts.py -v
-          echo "=== Second Seed Pass ==="
-          python scripts/seed_folio.py
+          python scripts/verify_seed_idempotency.py
 
       - name: Run automated safety, security and backend test suite
         env:
@@ -74,6 +70,7 @@ jobs:
           APP_SECRET: test_secret_key_32bytes_minimum_for_tests_12345
           DATABASE_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/folio
           TEST_DATABASE_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/folio_test
+          FOLIO_TEST_ADMIN_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/postgres
         run: |
           source venv/bin/activate
           pytest tests/safety tests/security tests/backend -v --junitxml=test-results/junit-backend.xml
@@ -138,6 +135,7 @@ jobs:
           APP_SECRET: test_secret_key_32bytes_minimum_for_tests_12345
           DATABASE_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/folio
           TEST_DATABASE_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/folio_test
+          FOLIO_TEST_ADMIN_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/postgres
         run: |
           source venv/bin/activate
           pytest tests/frontend -v --junitxml=test-results/junit-frontend.xml

@@ -69,7 +69,7 @@ class TestLiveDatabaseLifecycle:
     """Live database tests requiring a real, isolated PostgreSQL server."""
 
     def test_live_provision_migrate_seed_and_teardown(self):
-        manifest = TestRunManifest.create("lifecycle_run")
+        manifest = TestRunManifest.create()
         db_name = manifest.generate_db_name()
 
         # 1. Provision fresh test database
@@ -133,7 +133,7 @@ class TestLiveDatabaseLifecycle:
 
     def test_live_two_concurrent_runs_and_sentinel_isolation(self):
         admin_engine = create_engine(ADMIN_URL, isolation_level="AUTOCOMMIT")
-        sentinel_db = "folio_test_disposable_sentinel"
+        sentinel_db = TestRunManifest.create().generate_db_name("folio_test_sentinel")
 
         # Create sentinel database on disposable test instance
         with admin_engine.connect() as conn:
@@ -145,8 +145,8 @@ class TestLiveDatabaseLifecycle:
             conn.execute(text("CREATE TABLE sentinel_marker (id int, val text)"))
             conn.execute(text("INSERT INTO sentinel_marker VALUES (1, 'untouched_data')"))
 
-        run1 = TestRunManifest.create("worker1")
-        run2 = TestRunManifest.create("worker2")
+        run1 = TestRunManifest.create()
+        run2 = TestRunManifest.create()
 
         db1 = run1.generate_db_name()
         db2 = run2.generate_db_name()
@@ -159,11 +159,11 @@ class TestLiveDatabaseLifecycle:
             engine1 = create_engine(url1)
             engine2 = create_engine(url2)
 
-            with engine1.connect() as conn:
+            with engine1.begin() as conn:
                 conn.execute(text("CREATE TABLE t1 (val text)"))
                 conn.execute(text("INSERT INTO t1 VALUES ('run1_private')"))
 
-            with engine2.connect() as conn:
+            with engine2.begin() as conn:
                 conn.execute(text("CREATE TABLE t2 (val text)"))
                 conn.execute(text("INSERT INTO t2 VALUES ('run2_private')"))
 
@@ -198,7 +198,7 @@ class TestLiveDatabaseLifecycle:
 
     def test_live_existing_unowned_database_rejected(self):
         admin_engine = create_engine(ADMIN_URL, isolation_level="AUTOCOMMIT")
-        unowned_db = "folio_test_unowned_preexisting"
+        unowned_db = TestRunManifest.create().generate_db_name("folio_test_unowned")
 
         with admin_engine.connect() as conn:
             conn.execute(text(f'CREATE DATABASE "{unowned_db}"'))

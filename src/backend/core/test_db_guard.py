@@ -109,6 +109,13 @@ DEFAULT_POSTGRES_PORT: int = 5432
 VALID_IDENTIFIER_REGEX = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,62}$")
 
 
+def ownership_endpoint(target):
+    # Collision checks deliberately conflate loopback aliases; ownership must not:
+    # separate servers may bind 127.0.0.1 and 127.0.0.2 on the same port.
+    host = (target.effective_host or "127.0.0.1").lower()
+    return ("127.0.0.1" if host == "localhost" else host, target.normalized_port)
+
+
 # --- Pure Helpers ---
 
 def redact_url_credentials(url_str: str | None) -> str:
@@ -416,6 +423,7 @@ class TestRunManifest:
     created_at: str
     pid: int
     created_databases: Set[str] = field(default_factory=set)
+    owned_endpoints: Dict[str, Tuple[str, int]] = field(default_factory=dict)
 
     @classmethod
     def create(cls, run_id: str | None = None) -> "TestRunManifest":
@@ -433,22 +441,30 @@ class TestRunManifest:
     def generate_db_name(self, prefix: str = "folio_test") -> str:
         """Generates a unique, valid PostgreSQL database name qualified by this run ID."""
         prefix_clean = re.sub(r"[^a-zA-Z0-9_]", "_", prefix)
-        name = f"{prefix_clean}_{self.run_id}"
-        if len(name) > 63:
-            name = name[:63]
+        suffix = self.run_id[-40:]
+        name = f"{prefix_clean[:62 - len(suffix)]}_{suffix}"
         return name.lower()
 
     def is_owned(self, dbname: str) -> bool:
         """Verifies whether the given database name was provisioned and owned by this test run."""
         return dbname.strip().lower() in self.created_databases
 
-    def register_owned(self, dbname: str) -> None:
+    def register_owned(self, dbname: str, target: TargetValidationResult | None = None) -> None:
         """Registers a newly created database in this run manifest."""
         self.created_databases.add(dbname.strip().lower())
+        if target is not None:
+            self.owned_endpoints[dbname.strip().lower()] = ownership_endpoint(target)
+
+    def require_endpoint(self, dbname: str, target: TargetValidationResult) -> None:
+        """A database name alone never authorizes a destructive operation on another server."""
+        owned = self.owned_endpoints.get(dbname.strip().lower())
+        if owned != ownership_endpoint(target):
+            raise UnownedDatabaseError(f"Database '{dbname}' is not owned at this server endpoint.")
 
     def unregister_owned(self, dbname: str) -> None:
         """Removes a destroyed database from this run manifest."""
         self.created_databases.discard(dbname.strip().lower())
+        self.owned_endpoints.pop(dbname.strip().lower(), None)
 
     def to_dict(self) -> Dict[str, Any]:
         """Returns non-secret manifest representation for logging and handoff."""
@@ -462,7 +478,7 @@ class TestRunManifest:
 
 # --- Connected Identity Verification & Mutation Guards ---
 
-def verify_connected_identity(connection, expected_dbname: str) -> Dict[str, Any]:
+def verify_connected_identity(connection, expected_dbname: str, target: TargetValidationResult | None = None) -> Dict[str, Any]:
     """
     Queries current connection identity and verifies it strictly matches the expected owned test database.
     
@@ -478,12 +494,21 @@ def verify_connected_identity(connection, expected_dbname: str) -> Dict[str, Any
         raise ConnectedIdentityMismatchError("Failed to retrieve connected server identity from PostgreSQL.")
 
     connected_db, connected_user, server_addr, server_port = row[0], row[1], row[2], row[3]
+    # PostgreSQL's inet::text includes a host mask (127.0.0.1/32, ::1/128).
+    server_host = str(server_addr).split("/", 1)[0] if server_addr is not None else None
 
     if connected_db.strip().lower() != expected_dbname.strip().lower():
         raise ConnectedIdentityMismatchError(
             f"Connected database identity mismatch! Connected to '{connected_db}' (user: '{connected_user}') "
             f"but expected owned test database '{expected_dbname}'. Aborting mutation without DROP!"
         )
+
+    if target is not None:
+        import socket
+        expected_addresses = {target.effective_host}
+        expected_addresses.update(info[4][0] for info in socket.getaddrinfo(target.effective_host, None))
+        if server_host is None or server_host not in expected_addresses or server_port != target.normalized_port:
+            raise ConnectedIdentityMismatchError("Connected server endpoint mismatch. Aborting mutation without DROP!")
 
     return {
         "connected_database": connected_db,
@@ -507,8 +532,11 @@ def safe_reset_test_schema(test_engine, manifest: TestRunManifest, expected_dbna
 
     from sqlalchemy import text
 
+    target = validate_test_database_target(test_engine.url.render_as_string(hide_password=False))
+    manifest.require_endpoint(expected_dbname, target)
+
     with test_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-        verify_connected_identity(conn, expected_dbname)
+        verify_connected_identity(conn, expected_dbname, target)
         conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
         conn.execute(text("CREATE SCHEMA public"))
         conn.execute(text("GRANT ALL ON SCHEMA public TO public"))
@@ -558,9 +586,17 @@ def provision_test_database(
     if not VALID_IDENTIFIER_REGEX.match(target_name):
         raise TestDatabaseSafetyError(f"Invalid PostgreSQL identifier '{target_name}'.")
 
+    if check_ambient_libpq_env():
+        raise AmbientEnvOverrideError("Ambient libpq target overrides must be removed before provisioning.")
+    # Validate the effective driver target BEFORE CREATE DATABASE or any other mutation.
+    test_url = admin_url.set(database=target_name)
+    test_url_str = test_url.render_as_string(hide_password=False)
+    validated = validate_test_database_target(test_url_str)
+
     admin_engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
     try:
         with admin_engine.connect() as conn:
+            verify_connected_identity(conn, admin_url.database, validated)
             exists = conn.execute(
                 text("SELECT 1 FROM pg_database WHERE datname = :name"),
                 {"name": target_name},
@@ -572,17 +608,14 @@ def provision_test_database(
                         f"Database '{target_name}' already exists on server and is not owned by current test manifest {manifest.run_id}. "
                         f"Refusing to touch or reuse unowned database."
                     )
+                manifest.require_endpoint(target_name, validated)
             else:
                 conn.execute(text(f'CREATE DATABASE "{target_name}"'))
-                manifest.register_owned(target_name)
+                manifest.register_owned(target_name, validated)
     finally:
         admin_engine.dispose()
 
     # Build validated test URL pointing to the newly provisioned owned database
-    test_url = admin_url.set(database=target_name)
-    test_url_str = test_url.render_as_string(hide_password=False)
-    # Validate result through guard
-    validate_test_database_target(test_url_str)
     return test_url_str
 
 
@@ -607,9 +640,14 @@ def safe_teardown_test_database(
         )
 
     admin_url = make_url(admin_url_str)
+    target = validate_test_database_target(admin_url.set(database=target_name).render_as_string(hide_password=False))
+    manifest.require_endpoint(target_name, target)
+    if check_ambient_libpq_env():
+        raise AmbientEnvOverrideError("Ambient libpq target overrides must be removed before teardown.")
     admin_engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
     try:
         with admin_engine.connect() as conn:
+            verify_connected_identity(conn, admin_url.database, target)
             # Selectively terminate connections only for this specific owned database
             conn.execute(text(selective_terminate_backends_sql(target_name)))
             conn.execute(text(f'DROP DATABASE IF EXISTS "{target_name}"'))

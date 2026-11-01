@@ -92,35 +92,27 @@ if __name__ == "__main__":
 
 @pytest.fixture
 def shared_db():
-    """
-    Creates a temporary shared database file with WAL enabled for cross-process concurrency.
-    Yields the database URL string and engine.
-    """
-    fd, path = tempfile.mkstemp(suffix=".db", prefix="folio_shared_test_")
-    os.close(fd)
-    db_url = f"sqlite:///{path}"
-
+    """Fresh migrated PostgreSQL database shared by the worker processes."""
+    import argparse
+    from alembic.config import Config
+    from alembic import command
+    from sqlalchemy.engine import make_url
+    from src.backend.core.test_db_guard import TestRunManifest, provision_test_database, safe_teardown_test_database
+    admin_url = os.environ.get("FOLIO_TEST_ADMIN_URL") or make_url(settings.TEST_DATABASE_URL).set(database="postgres").render_as_string(hide_password=False)
+    manifest = TestRunManifest.create()
+    name = manifest.generate_db_name("folio_test_limiter")
+    db_url = provision_test_database(admin_url, manifest, requested_dbname=name)
     engine = create_engine(db_url)
-    with engine.connect() as conn:
-        conn.execute(text("PRAGMA journal_mode=WAL;"))
-        conn.commit()
-
-    Base.metadata.create_all(bind=engine)
-
-    yield db_url, engine
-
-    engine.dispose()
     try:
-        if os.path.exists(path):
-            os.remove(path)
-        wal_path = path + "-wal"
-        shm_path = path + "-shm"
-        if os.path.exists(wal_path):
-            os.remove(wal_path)
-        if os.path.exists(shm_path):
-            os.remove(shm_path)
-    except Exception:
-        pass
+        cfg = Config(str(Path(settings.PROJECT_ROOT) / "alembic.ini"))
+        cfg.cmd_opts = argparse.Namespace(x=[f"db_url={db_url}"])
+        command.upgrade(cfg, "head")
+        from scripts.seed_folio import run_seed
+        run_seed(target=engine)
+        yield db_url, engine
+    finally:
+        engine.dispose()
+        safe_teardown_test_database(admin_url, manifest, name)
 
 
 def run_worker_process(db_url: str, action: str, key: str, limit: int = 5, window: int = 60) -> dict:
@@ -395,7 +387,7 @@ def test_api_registration_abuse_returns_429_with_retry_after(shared_db):
                     "display_name": f"Burst {i}",
                 }
             )
-            # Either 201 or if DB doesn't have users table, 500/409, but rate limit checks before user insert!
+            assert reg_res.status_code == 201, reg_res.text
             csrf_token = reg_res.json().get("csrf_token", csrf_token)
 
         # Overflow attempt must trigger 429
