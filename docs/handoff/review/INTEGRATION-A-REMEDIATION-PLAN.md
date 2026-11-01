@@ -8,7 +8,7 @@ Nguồn: [INTEGRATION-A-REVIEW.md](F:/dpl13.10/WikiSearchEngine-github/docs/hand
 
 Sửa 7 findings IA-01 đến IA-07, bổ sung bằng chứng còn thiếu và tạo một SHA tích hợp đủ điều kiện bắt đầu P03. Giữ FastAPI, PostgreSQL, SQLAlchemy/Alembic, vanilla JS. Chưa triển khai importer, outbox, index worker, BM25 hay search API mới.
 
-Đề nghị dùng **7 chat Gemini chạy tuần tự**, mỗi chat thực hiện đúng một R00-R06. Tất cả dùng cùng worktree tích hợp do R00 chuẩn bị. Không tiếp tục sửa rải rác trên P01/P02 rồi chỉ trao đổi handoff.
+Đề nghị dùng **8 chat Gemini chạy tuần tự**, gồm R00-R04.5 và R05-R06. Tất cả dùng cùng worktree tích hợp do R00 chuẩn bị. Không tiếp tục sửa rải rác trên P01/P02 rồi chỉ trao đổi handoff.
 
 ```text
 R00: Tích hợp source, chưa chạy fixture cũ
@@ -16,6 +16,7 @@ R00: Tích hợp source, chưa chạy fixture cũ
   -> R02: Bootstrap identity + startup/security regression
   -> R03: Chốt Document ID và pagination/generation contract
   -> R04: Rate limit dùng chung giữa process
+  -> R04.5: Integration A checkpoint sau R02-R04
   -> R05: Artifact isolation + clean setup/CI + regression
   -> R06: Review độc lập -> GO / GO WITH CONDITIONS / NO-GO
   -> P03 chỉ khi không còn blocker
@@ -24,6 +25,8 @@ R00: Tích hợp source, chưa chạy fixture cũ
 R00 tích hợp trước để các bản sửa cùng nằm trên một nền. Việc này không mâu thuẫn ưu tiên IA-02: **không chạy pytest fixture, seed, migration hoặc CLI đụng DB trong R00**. R01 phải đóng đường unsafe trước lần chạy tích hợp đầu tiên.
 
 IA-06 và IA-07 vẫn là non-blocker đối với kiến trúc P03 như báo cáo gốc. Kế hoạch mặc định sửa cả hai vì người dùng yêu cầu sửa các findings; không đổi phân loại để buộc làm trước mọi tính năng production.
+
+R04.5 là checkpoint bắt buộc trước R05, không phải một remediation stream mới. Nó rà lại ancestry, migration head, shared test fixture và các handoff sau khi R02-R04 đã cùng nằm trên branch. R04.5 được phép sửa lỗi tích hợp nhỏ phát hiện tại checkpoint; nếu phát hiện lỗi thiết kế lớn thì dừng và tạo follow-up thay vì mở P03.
 
 ## 2. Baseline, workspace và quyền thao tác
 
@@ -185,7 +188,21 @@ Gemini có thể chọn cơ chế khác nếu chứng minh được cùng invari
 - API abuse thật trả 429; không chỉ unit test hai instance cùng process. Security/backend regression pass.
 - Handoff: `IA-R04-shared-rate-limit.md`, ghi migration head mới để R05/R06/P03 dùng đúng down_revision sau này.
 
-## 9. R05 — Artifact, fixtures, clean setup và CI
+## 9. R04.5 — Integration A checkpoint sau R02-R04
+
+**Mục tiêu:** xác nhận remediation đã ghép đúng trên một branch, không chỉ đúng khi đọc từng handoff. Không bắt đầu P03 và không chạy destructive fixture trên DB chưa được R01 xác nhận.
+
+1. Xác minh branch/HEAD/ancestry chứa R00, R01, R02, R03 và R04; đối chiếu changed files với handoff, tìm conflict resolution còn sót và import cycle.
+2. Kiểm tra `alembic heads`, `alembic history` và SQL offline: phải có một head `20261101_rate_limit`; P03 sau này dùng head này làm `down_revision`.
+3. Review ownership: manifest chỉ đăng ký database sau `CREATE DATABASE` thành công; DB tồn tại trước đó phải bị từ chối, không được coi là owned chỉ vì target URL hợp lệ. Kiểm tra `safe_reset` không chạy trên unowned DB.
+4. Review mọi live PostgreSQL test call site chống lệch tên argument/signature. Cụ thể, `provision_test_database` phải được gọi bằng `requested_dbname` hoặc signature phải đổi nhất quán; không để live test chỉ fail khi PostgreSQL xuất hiện.
+5. Phân biệt pure/SQLite/multiprocess với PostgreSQL live trong R02/R04 handoff. Không ghi PostgreSQL verified nếu môi trường live vẫn `BLOCKED_ENV`.
+6. Chạy checks không cần PostgreSQL: pure safety, startup/bootstrap unit, pure rate-limit, compile và migration offline. Nếu có PostgreSQL owned thì chạy thêm lifecycle; nếu chưa, ghi `BLOCKED_ENV` và không dùng shared DB.
+7. Kiểm tra R03 contract và prompt P03 khớp R04 head, UUIDv5 preservation và search-context TTL/lease/count semantics; chỉ sửa tài liệu stale, không mở rộng sang importer/index.
+
+Tạo `docs/handoff/gemini/IA-R04.5-integration-checkpoint.md` với exact SHA, ancestry, migration head, changed-file audit, commands/results, PostgreSQL availability và lỗi đã sửa. Nếu còn lỗi ownership/signature/migration: `INTEGRATION BLOCKED`. Nếu static đạt nhưng thiếu PostgreSQL: `INTEGRATION STATIC PASS / LIVE DB BLOCKED`; chưa được tuyên bố Integration A PASS hay GO P03.
+
+## 10. R05 — Artifact, fixtures, clean setup và CI
 
 **Sửa:** IA-07; các gap P02/Integration A. **Owner:** browser fixtures/tests/capture scripts, requirements/constraints khi thật sự cần, CI, README/setup, evidence manifest.
 
@@ -211,7 +228,7 @@ Gemini có thể chọn cơ chế khác nếu chứng minh được cùng invari
 
 Nghiệm thu: regression có evidence mới, output không đụng docs/verification, fail path có trace/screenshot thật, cùng SHA. Handoff: `IA-R05-clean-ci-artifacts.md`. IA-01 chỉ chuyển VERIFIED sau khi các tests nền tích hợp đạt; kết luận readiness cuối thuộc R06.
 
-## 10. R06 — Review độc lập và khóa đầu vào P03
+## 11. R06 — Review độc lập và khóa đầu vào P03
 
 **Owner:** đọc source/diff/tests, thực thi kiểm tra cô lập và báo cáo mới; không tự sửa code để vừa là implementer vừa duyệt finding.
 
@@ -234,7 +251,7 @@ Báo cáo mới: `docs/handoff/review/INTEGRATION-A-REVIEW-R2.md` hoặc timesta
 
 GO khi không còn blocker và đủ bằng chứng nền. GO WITH CONDITIONS chỉ cho phần còn lại không phải điều kiện phải làm trước P03. NO-GO nếu G-A đến G-E chưa đủ; không dùng conditional để che blocker. Sẵn sàng P03 không đồng nghĩa production deployable.
 
-## 11. Handoff cuối và cách bắt đầu P03
+## 12. Handoff cuối và cách bắt đầu P03
 
 - Ghi worktree, integration branch, **source SHA đã test**, migration head hiện tại, env/seed commands và contract version. Nếu commit cuối chỉ bổ sung report, ghi cả source SHA đã test và commit docs; không nhầm chúng.
 - Không để P03 tự suy ra phải quay về main c4b19cf hoặc nhánh P01/P02 riêng.

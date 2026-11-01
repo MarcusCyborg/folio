@@ -363,3 +363,77 @@ class TestAmbientLibpqEnvControl:
             assert "PGDATABASE" not in os.environ
         finally:
             os.environ.pop("PGDATABASE", None)
+
+
+class TestR045RegressionSafeguards:
+    """
+    R04.5 Regression Tests:
+    1. Proves safe_reset refuses unowned DB when DB pre-existed on server prior to test run.
+    2. Proves provision_test_database accepts requested_dbname, target_database, and positional args without TypeError.
+    3. Proves zero DROP statement or engine connection occurs when unowned DB is targeted.
+    """
+
+    def test_safe_reset_refuses_pre_existing_unowned_db_without_create_database(self):
+        """
+        Simulates the conftest lifecycle guard:
+        If target DB already exists prior to the test run, manifest does not register it.
+        safe_reset_test_schema must reject it with UnownedDatabaseError without issuing any DROP statement.
+        """
+        manifest = TestRunManifest.create("conftest_run_45")
+        mock_engine = MagicMock()
+
+        # Database 'folio_test_existing' is NOT registered in manifest (pre-existed prior to run)
+        assert manifest.is_owned("folio_test_existing") is False
+
+        with pytest.raises(UnownedDatabaseError) as exc_info:
+            safe_reset_test_schema(mock_engine, manifest, "folio_test_existing")
+
+        assert "is not registered in current run manifest" in str(exc_info.value)
+        # Invariant: Engine connection is never opened, no DROP statements issued
+        mock_engine.connect.assert_not_called()
+
+    def test_provision_test_database_signature_interoperability(self):
+        """
+        Verifies that provision_test_database works identically with:
+        - keyword requested_dbname
+        - keyword target_database
+        - positional argument
+        Eliminates any risk of TypeError on live test execution.
+        """
+        from unittest.mock import patch
+
+        for mode in ("requested_dbname", "target_database", "positional"):
+            manifest = TestRunManifest.create(f"sig_run_{mode}")
+            target_name = f"folio_test_{mode}"
+
+            mock_engine = MagicMock()
+            mock_conn = MagicMock()
+            mock_engine.connect.return_value.__enter__.return_value = mock_conn
+            mock_conn.execute.return_value.scalar.return_value = 0  # does not exist
+            mock_engine.dialect.create_connect_args.return_value = ((), {"dbname": target_name})
+
+            with patch("src.backend.core.test_db_guard.create_engine", return_value=mock_engine):
+                if mode == "requested_dbname":
+                    url = provision_test_database(
+                        "postgresql://tester:secret@127.0.0.1:5432/postgres",
+                        manifest,
+                        requested_dbname=target_name,
+                    )
+                elif mode == "target_database":
+                    url = provision_test_database(
+                        "postgresql://tester:secret@127.0.0.1:5432/postgres",
+                        manifest,
+                        target_database=target_name,
+                    )
+                else:
+                    url = provision_test_database(
+                        "postgresql://tester:secret@127.0.0.1:5432/postgres",
+                        manifest,
+                        target_name,
+                    )
+
+            assert target_name in url
+            assert manifest.is_owned(target_name) is True
+            # Verifies CREATE DATABASE was executed with the expected target name
+            executed_sql = [str(call_arg[0][0]) for call_arg in mock_conn.execute.call_args_list if call_arg[0]]
+            assert any(f'CREATE DATABASE "{target_name}"' in s for s in executed_sql)

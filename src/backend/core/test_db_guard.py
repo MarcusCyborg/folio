@@ -531,6 +531,7 @@ def provision_test_database(
     admin_url_str: str,
     manifest: TestRunManifest,
     requested_dbname: str | None = None,
+    target_database: str | None = None,
 ) -> str:
     """
     Provisions a new PostgreSQL test database owned by the current run manifest:
@@ -539,6 +540,8 @@ def provision_test_database(
     3. If it exists and is NOT owned by this run manifest: raises UnownedDatabaseError.
     4. If not exists: executes CREATE DATABASE and registers ownership in manifest.
     5. Returns the validated test database URL string.
+
+    Accepts either `requested_dbname` or `target_database` keyword arguments for consistency.
     """
     from sqlalchemy import text
 
@@ -546,7 +549,8 @@ def provision_test_database(
     if not (admin_url.drivername.startswith("postgresql")):
         raise TestDatabaseSafetyError("Admin connection must use PostgreSQL driver.")
 
-    target_name = (requested_dbname or manifest.generate_db_name()).strip().lower()
+    target = requested_dbname or target_database
+    target_name = (target or manifest.generate_db_name()).strip().lower()
 
     if target_name in PROTECTED_DB_NAMES:
         raise TestDatabaseSafetyError(f"Cannot provision protected database name '{target_name}'.")

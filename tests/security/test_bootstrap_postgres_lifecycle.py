@@ -78,10 +78,7 @@ class TestLivePostgresBootstrapLifecycle:
         run_db_name = f"folio_test_bootstrap_{manifest.run_id}"
 
         # 1. Provision fresh test database
-        provision_test_database(ADMIN_URL, manifest, target_database=run_db_name)
-
-        admin_url_obj = make_url(ADMIN_URL)
-        target_db_url = str(admin_url_obj.set(database=run_db_name))
+        target_db_url = provision_test_database(ADMIN_URL, manifest, requested_dbname=run_db_name)
 
         # 2. Run Alembic upgrade head
         from alembic.config import Config

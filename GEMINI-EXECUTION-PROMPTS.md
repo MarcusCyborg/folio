@@ -114,13 +114,15 @@ Phụ thuộc P01/P02; chạy trước P04/P05.
 Bạn là data/index platform engineer. Thực hiện M3 để PostgreSQL Folio là source of truth có index lifecycle an toàn.
 
 Đọc phần Workspace và Quy tắc chung trong `GEMINI-EXECUTION-PROMPTS.md`. Chỉ thực hiện P03 sau khi P01/P02 đã được tích hợp và kiểm tra chung; không chỉ dựa vào hai branch riêng.
+Worktree bắt buộc: `F:/dpl13.10/WikiSearchEngine-ia-fix`
+Branch bắt buộc: `codex/integration-a-remediation`
 
-Đọc P00-P02 handoff, IA-R00-R03 handoff, `docs/search-contract.md` (v2.1.0), Document/Category/Tag/InteractionLog models, Alembic heads, content service và legacy loader.
+Đọc P00-P02 handoff, IA-R00-R04.5 handoff, `docs/search-contract.md` (v2.1.0), Document/Category/Tag/InteractionLog models, Alembic heads, content service và legacy loader.
 
 Đầu vào đã chốt từ Search Contract v2.1.0 (IA-R03):
 1. Canonical Document ID: UUID Folio hiện hữu gồm v5 (103/103 tài liệu trong `fixtures/folio/documents.jsonl`, SHA256: 5413a1f6...) và v4 (default tạo mới). Importer tuyệt đối không re-mint ID hoặc enforce UUIDv4; giữ nguyên 103 IDs và mapping source_url -> Document.id. Bỏ claims 165/162 cũ.
 2. Generation Retention & Lease Contract: P03 worker lifecycle khi atomic swap G1 -> G2 phải đặt G1 vào draining; background GC worker KHÔNG ĐƯỢC xóa/purge posting lists/files của generation khi còn active search context lease chưa hết hạn (TTL 15 phút, configurable `SEARCH_CONTEXT_TTL_MINUTES=15`).
-3. Alembic Down Revision: Single linear head `20261031_click_unique` (hoặc head sau R04 shared rate-limit). Không có "2 heads".
+3. Alembic Down Revision: Bắt buộc dùng single linear head `20261101_rate_limit` làm down_revision (từ Task R04). Tuyệt đối không dùng 20261031_click_unique hay tạo multi-head.
 4. Phân công: P03 sở hữu outbox/index schema, importer, generation retention/lease check và reader interface; không làm BM25 scoring (P04) và không làm Search API / Search Context storage (P05).
 
 Ownership: migration/model/service mới cho index generation, content revision và outbox jobs; package `src/backend/search_index/`; importer/validator/CLI; lifecycle tests. Hạn chế sửa public API; P05 sở hữu.

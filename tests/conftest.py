@@ -52,7 +52,7 @@ session_manifest = TestRunManifest.create()
 # Validate test database target using pure effective-driver-target safety guard
 target_validation = validate_test_database_target(settings.TEST_DATABASE_URL, settings.DATABASE_URL)
 test_db_url = target_validation.test_url_str
-session_manifest.register_owned(target_validation.effective_database)
+# Database ownership is ONLY registered after successful CREATE DATABASE in ensure_test_database_exists
 
 test_engine = create_engine(test_db_url, poolclass=pool.NullPool)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine, expire_on_commit=False)
@@ -65,7 +65,9 @@ core_db.SessionLocal = TestingSessionLocal
 def ensure_test_database_exists(db_url_str: str):
     """
     Connects to administrative database ('postgres') and provisions the test DB if it does not exist.
-    Strictly terminates connections ONLY for the run's owned database to avoid blanket terminating other runs.
+    Registers ownership in session_manifest ONLY after successful CREATE DATABASE.
+    If target DB already existed prior to run, ownership is not registered, causing safe_reset
+    to reject unowned DB mutation.
     """
     url = make_url(db_url_str)
     target_db = url.database
@@ -86,8 +88,11 @@ def ensure_test_database_exists(db_url_str: str):
                 session_manifest.register_owned(target_db)
                 print(f"[conftest] Test database '{target_db}' created successfully.")
             else:
-                # Terminate ONLY connections to this specific database
-                conn.execute(text(selective_terminate_backends_sql(target_db)))
+                # If target already exists prior to run, do not claim ownership or terminate backends
+                if session_manifest.is_owned(target_db):
+                    conn.execute(text(selective_terminate_backends_sql(target_db)))
+                else:
+                    print(f"[conftest] Database '{target_db}' already exists and is not owned by run {session_manifest.run_id}.")
     except Exception as e:
         print(f"[conftest] Note on auto-create test DB: {e}")
     finally:

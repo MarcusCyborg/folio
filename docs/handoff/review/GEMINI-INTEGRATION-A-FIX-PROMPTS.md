@@ -4,11 +4,13 @@ Ngày lập: 01/11/2026. Dùng cùng [kế hoạch chi tiết](F:/dpl13.10/WikiS
 
 ## Cách dùng
 
-Mở một chat Gemini mới cho mỗi R00-R06, chạy tuần tự. Copy nguyên block của chat đó. R00 bắt đầu từ repo nguồn và chuẩn bị worktree tích hợp. Các chat sau mở worktree ghi trong `IA-R00-integration.md`, mặc định đề nghị `F:/dpl13.10/WikiSearchEngine-ia-fix`.
+Mở một chat Gemini mới cho mỗi R00-R04.5 và R05-R06, chạy tuần tự. Copy nguyên block của chat đó. R00 bắt đầu từ repo nguồn và chuẩn bị worktree tích hợp. Các chat sau mở worktree ghi trong `IA-R00-integration.md`, mặc định đề nghị `F:/dpl13.10/WikiSearchEngine-ia-fix`.
 
 Nếu thiếu quyền đọc file, đưa nội dung review/plan/handoff tương ứng cho Gemini; không để agent đoán và tự báo hoàn tất. Không giao tất cả prompt cùng lúc cho các chat sửa chung một checkout. Các prompt không yêu cầu spawn subagents.
 
 Chưa chạy P03. Không có prompt nào cho phép push/deploy hoặc sửa main.
+
+R04.5 là checkpoint tích hợp bắt buộc sau R04 và trước R05. Đây là bước review/sửa lỗi ghép, không phải một worktree song song.
 
 ## R00 — Tích hợp local, bảo toàn workspace
 
@@ -219,6 +221,60 @@ Sau targeted checks chạy security/backend regression. Không nới tests để
 Commit local scope sau diff review; viết docs/handoff/gemini/IA-R04-shared-rate-limit.md
 với policy, migration head, commands/results/gaps. Thiếu DB/multiprocess evidence
 thì ghi chưa VERIFIED dù code đã viết. Dừng sau R04.
+```
+
+## R04.5 — Integration A checkpoint sau R02-R04
+
+```text
+Bạn là integration reviewer của Folio. Chỉ thực hiện checkpoint R04.5 sau khi
+R02, R03 và R04 đã hoàn thành trên worktree tích hợp; chưa chạy P03 và chưa làm
+R05 artifact/CI remediation.
+
+Worktree bắt buộc: F:/dpl13.10/WikiSearchEngine-ia-fix
+Branch: codex/integration-a-remediation
+Đọc AGENTS.md, status/diff/refs, IA-R00/R01/R02/R03/R04 handoff, review gốc và
+mục R04.5 của INTEGRATION-A-REMEDIATION-PLAN.md. Không làm việc trên main/P01/P02,
+không reset/revert/push/deploy. Giữ edits khác; dừng nếu source đổi đồng thời.
+
+Mục tiêu là kiểm tra giao điểm thực tế, không chỉ đọc claim trong handoff.
+
+1. Xác minh ancestry có R00, R01, R02, R03, R04; audit changed files, unresolved
+   conflict, imports và `git diff --check`. Ghi exact SHA.
+2. Chạy `alembic heads`, `alembic history` và `alembic upgrade head --sql` bằng
+   venv sạch nếu có. Head phải là `20261101_rate_limit`; ghi rõ P03 phải dùng
+   head này làm down_revision.
+3. Audit IA-02 bằng code: trong `tests/conftest.py`, manifest chỉ được register
+   database sau CREATE DATABASE thành công. Nếu target đã tồn tại trước run mà
+   đang được register trước provisioning, đó là blocker; sửa tối thiểu và thêm
+   regression test chứng minh safe_reset từ chối unowned DB. Không dùng DB thật.
+4. Audit mọi call site của `provision_test_database`: signature hiện dùng
+   `requested_dbname`; sửa test/helper gọi `target_database` nếu còn lệch, hoặc
+   đổi signature nhất quán. Chạy `python -m compileall` và pure tests để chứng
+   minh lỗi live sẽ không bị che bởi BLOCKED_ENV.
+5. Đọc claims R02/R04: tách pure, SQLite, OS-process và PostgreSQL evidence. Nếu
+   multiprocess suite dùng SQLite, không gọi đó là PostgreSQL verified. Live PG
+   thiếu thì ghi BLOCKED_ENV; không thay bằng SQLite.
+6. Chạy các kiểm tra an toàn không cần PostgreSQL:
+   `pytest --noconftest tests/safety/test_pure_safety.py tests/security/test_bootstrap_security.py tests/security/test_startup_subprocess.py tests/security/test_runtime_security_hardening.py tests/safety/test_pure_rate_limit.py -q`,
+   compileall và offline migration. Nếu có PostgreSQL instance mới do R01 sở hữu,
+   chạy thêm live lifecycle và bootstrap; tuyệt đối không dùng shared DB.
+7. Đối chiếu R03 contract với migration head và prompt P03: UUIDv5 fixture giữ
+   nguyên, context TTL/lease/count semantics không mâu thuẫn, prompt P03 trỏ
+   worktree/head đúng. Chỉ sửa tài liệu stale, không viết importer/index/search.
+
+Nếu phát hiện lỗi ownership/signature/migration/integration, sửa tối thiểu trong
+scope R04.5, thêm test và ghi rõ; không tự mở rộng thành R05/P03. Commit local
+đúng file sau diff review, không commit secret/output ảnh.
+
+Tạo docs/handoff/gemini/IA-R04.5-integration-checkpoint.md gồm exact SHA,
+ancestry, migration head, files changed, commands/exit/results, PG availability,
+fixes và gaps. Trạng thái phải là một trong:
+- INTEGRATION BLOCKED nếu còn lỗi ownership/signature/migration hoặc test nền fail.
+- INTEGRATION STATIC PASS / LIVE DB BLOCKED nếu static đạt nhưng không có PG.
+- INTEGRATION CHECKPOINT PASS chỉ khi static và live PG evidence đều đạt.
+
+Không tuyên bố Integration A PASS hoặc GO P03 chỉ từ pure/SQLite/collect-only.
+Phản hồi tiếng Việt và dừng sau R04.5.
 ```
 
 ## R05 — Sửa artifacts, fixtures và CI; chạy regression
