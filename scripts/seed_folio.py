@@ -18,6 +18,7 @@ from src.backend.models.auth import Role, Permission, RolePermission, User
 from src.backend.models.taxonomy import Category, Tag
 from src.backend.models.document import Document, DocumentTag
 from src.backend.models.system import AppSetting, AuditLog
+from src.backend.search_index.outbox import record_revision_and_outbox_job
 
 ROLES_CATALOG = [
     ("member", "Library Member"),
@@ -188,6 +189,8 @@ def seed_taxonomy_and_documents(db: Session):
 
                 for tag_obj in doc_tag_objs:
                     db.add(DocumentTag(document_id=doc.id, tag_id=tag_obj.id))
+
+                record_revision_and_outbox_job(db, doc)
 
     db.flush()
 
