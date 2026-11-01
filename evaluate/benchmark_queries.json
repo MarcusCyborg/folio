@@ -1,0 +1,227 @@
+{
+  "version": "1.0.0",
+  "total_queries": 30,
+  "split_counts": {
+    "tune": 10,
+    "test": 20
+  },
+  "category_counts": {
+    "exact_title": 6,
+    "multi_term": 6,
+    "natural_language": 6,
+    "ambiguous": 6,
+    "negative": 6
+  },
+  "queries": [
+    {
+      "query_id": "Q_EXACT_01",
+      "query": "Deep learning",
+      "category": "exact_title",
+      "split": "test",
+      "description": "Exact match title query on foundational AI research"
+    },
+    {
+      "query_id": "Q_EXACT_02",
+      "query": "Residual neural network",
+      "category": "exact_title",
+      "split": "tune",
+      "description": "Exact match title query on deep learning architecture"
+    },
+    {
+      "query_id": "Q_EXACT_03",
+      "query": "Binary search tree",
+      "category": "exact_title",
+      "split": "test",
+      "description": "Exact match title query on core computer science data structure"
+    },
+    {
+      "query_id": "Q_EXACT_04",
+      "query": "Cognitive load",
+      "category": "exact_title",
+      "split": "tune",
+      "description": "Exact match title query on neuroscience / cognitive psychology"
+    },
+    {
+      "query_id": "Q_EXACT_05",
+      "query": "Bayesian optimization",
+      "category": "exact_title",
+      "split": "test",
+      "description": "Exact match title query on mathematical optimization"
+    },
+    {
+      "query_id": "Q_EXACT_06",
+      "query": "Work ethic",
+      "category": "exact_title",
+      "split": "test",
+      "description": "Exact match title query on technology and sociological research"
+    },
+    {
+      "query_id": "Q_MULTI_01",
+      "query": "deep learning neural network architectures",
+      "category": "multi_term",
+      "split": "test",
+      "description": "Technical multi-term query targeting neural model architectures"
+    },
+    {
+      "query_id": "Q_MULTI_02",
+      "query": "gradient descent and optimization software",
+      "category": "multi_term",
+      "split": "tune",
+      "description": "Multi-term query targeting optimization algorithms and solver software"
+    },
+    {
+      "query_id": "Q_MULTI_03",
+      "query": "public key cryptography and rsa algorithm",
+      "category": "multi_term",
+      "split": "test",
+      "description": "Multi-term query targeting cryptographic systems and complexity"
+    },
+    {
+      "query_id": "Q_MULTI_04",
+      "query": "neuroplasticity and synaptic plasticity in memory",
+      "category": "multi_term",
+      "split": "test",
+      "description": "Multi-term query targeting cognitive neuroscience and neural adaptation"
+    },
+    {
+      "query_id": "Q_MULTI_05",
+      "query": "peer review and preprint repositories in academic publishing",
+      "category": "multi_term",
+      "split": "tune",
+      "description": "Multi-term query targeting scientific publishing workflows"
+    },
+    {
+      "query_id": "Q_MULTI_06",
+      "query": "work life balance and workplace burnout",
+      "category": "multi_term",
+      "split": "test",
+      "description": "Multi-term query targeting labor sociology and workplace conditions"
+    },
+    {
+      "query_id": "Q_NATURAL_01",
+      "query": "how do artificial neural networks learn hierarchical representations",
+      "category": "natural_language",
+      "split": "test",
+      "description": "Conceptual question on deep learning feature hierarchy"
+    },
+    {
+      "query_id": "Q_NATURAL_02",
+      "query": "what are the differences between binary search trees and b trees",
+      "category": "natural_language",
+      "split": "test",
+      "description": "Comparative data structures question on indexing mechanisms"
+    },
+    {
+      "query_id": "Q_NATURAL_03",
+      "query": "how does cognitive overload impact human working memory capacity",
+      "category": "natural_language",
+      "split": "tune",
+      "description": "Explanatory neuroscience question on working memory limitations"
+    },
+    {
+      "query_id": "Q_NATURAL_04",
+      "query": "what algorithms are used for continuous non linear mathematical optimization",
+      "category": "natural_language",
+      "split": "test",
+      "description": "Algorithmic question on continuous optimization solvers"
+    },
+    {
+      "query_id": "Q_NATURAL_05",
+      "query": "how does open access publishing affect scientific research dissemination",
+      "category": "natural_language",
+      "split": "tune",
+      "description": "Policy research question on academic open access initiatives"
+    },
+    {
+      "query_id": "Q_NATURAL_06",
+      "query": "what are the social arguments for guaranteed minimum income and job guarantee",
+      "category": "natural_language",
+      "split": "test",
+      "description": "Socioeconomic inquiry into modern welfare economics"
+    },
+    {
+      "query_id": "Q_AMBIG_01",
+      "query": "networks",
+      "category": "ambiguous",
+      "split": "test",
+      "description": "Short ambiguous query matching both neural networks and computer networks"
+    },
+    {
+      "query_id": "Q_AMBIG_02",
+      "query": "trees",
+      "category": "ambiguous",
+      "split": "tune",
+      "description": "Short query matching algorithmic tree data structures"
+    },
+    {
+      "query_id": "Q_AMBIG_03",
+      "query": "optimization",
+      "category": "ambiguous",
+      "split": "test",
+      "description": "Broad single-word query spanning mathematical and ML solvers"
+    },
+    {
+      "query_id": "Q_AMBIG_04",
+      "query": "memory",
+      "category": "ambiguous",
+      "split": "tune",
+      "description": "Polysemous query matching recurrent memory (LSTM) and cognitive memory"
+    },
+    {
+      "query_id": "Q_AMBIG_05",
+      "query": "publishing",
+      "category": "ambiguous",
+      "split": "test",
+      "description": "Broad query matching scholarly communication and publishing houses"
+    },
+    {
+      "query_id": "Q_AMBIG_06",
+      "query": "unemployment",
+      "category": "ambiguous",
+      "split": "test",
+      "description": "General economic term covering structural and youth unemployment"
+    },
+    {
+      "query_id": "Q_NEG_01",
+      "query": "quantum teleportation and quantum key distribution protocol",
+      "category": "negative",
+      "split": "test",
+      "description": "Physics / quantum topic absent from published catalog (verifies 0-result handling)"
+    },
+    {
+      "query_id": "Q_NEG_02",
+      "query": "photosynthesis and thylakoid membrane light dependent reactions",
+      "category": "negative",
+      "split": "tune",
+      "description": "Plant biology topic completely out of domain"
+    },
+    {
+      "query_id": "Q_NEG_03",
+      "query": "roman gladiatorial weapons and colosseum combat history",
+      "category": "negative",
+      "split": "test",
+      "description": "Ancient history query with zero relevant articles"
+    },
+    {
+      "query_id": "Q_NEG_04",
+      "query": "volcanic eruption plate tectonics and basaltic magma flow",
+      "category": "negative",
+      "split": "tune",
+      "description": "Geology / volcanology topic with zero relevant articles"
+    },
+    {
+      "query_id": "Q_NEG_05",
+      "query": "deep sea hydrothermal vents and chemosynthetic ocean organisms",
+      "category": "negative",
+      "split": "test",
+      "description": "Marine biology topic with zero relevant articles"
+    },
+    {
+      "query_id": "Q_NEG_06",
+      "query": "paleolithic cave paintings and ancient prehistoric rock art",
+      "category": "negative",
+      "split": "test",
+      "description": "Archaeology topic with zero relevant articles"
+    }
+  ]
+}
