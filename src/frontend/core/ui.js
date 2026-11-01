@@ -29,6 +29,8 @@ export function notify(message, { kind = 'info', duration = 3500 } = {}) {
 
 export function confirmAction({ title = 'Confirm Action', message, confirmLabel = 'Confirm', destructive = false } = {}) {
   return new Promise((resolve) => {
+    const previousActiveElement = document.activeElement;
+
     const backdrop = document.createElement('div');
     backdrop.className = 'dialog-backdrop';
 
@@ -36,6 +38,7 @@ export function confirmAction({ title = 'Confirm Action', message, confirmLabel 
     dialog.className = 'dialog';
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-label', title);
 
     const h3 = document.createElement('h3');
     h3.textContent = title;
@@ -51,10 +54,12 @@ export function confirmAction({ title = 'Confirm Action', message, confirmLabel 
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'btn btn-secondary';
     cancelBtn.textContent = 'Cancel';
+    cancelBtn.type = 'button';
 
     const confirmBtn = document.createElement('button');
     confirmBtn.className = destructive ? 'btn btn-danger' : 'btn btn-primary';
     confirmBtn.textContent = confirmLabel;
+    confirmBtn.type = 'button';
 
     actions.appendChild(cancelBtn);
     actions.appendChild(confirmBtn);
@@ -65,7 +70,14 @@ export function confirmAction({ title = 'Confirm Action', message, confirmLabel 
     confirmBtn.focus();
 
     function cleanup(result) {
-      document.body.removeChild(backdrop);
+      if (backdrop.parentNode) {
+        document.body.removeChild(backdrop);
+      }
+      if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
+        try {
+          previousActiveElement.focus();
+        } catch (_) {}
+      }
       resolve(result);
     }
 
@@ -74,16 +86,33 @@ export function confirmAction({ title = 'Confirm Action', message, confirmLabel 
     backdrop.addEventListener('click', (e) => {
       if (e.target === backdrop) cleanup(false);
     });
+
+    // Keyboard navigation: Escape to cancel, Tab loop for focus trapping
     dialog.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') cleanup(false);
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        cleanup(false);
+      } else if (e.key === 'Tab') {
+        const focusable = [cancelBtn, confirmBtn];
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     });
   });
 }
 
-export function renderPagination(container, { page = 1, pageSize = 20, total = 0, onChange } = {}) {
+export function renderPagination(container, { page = 1, pageSize = 20, total = 0, onChange, hasMore } = {}) {
   container.innerHTML = '';
   const totalPages = Math.ceil(total / pageSize) || 1;
-  if (totalPages <= 1) return;
+  const isSinglePage = totalPages <= 1 && (hasMore === undefined || !hasMore);
+  if (isSinglePage) return;
 
   const wrapper = document.createElement('nav');
   wrapper.className = 'pagination';
@@ -92,19 +121,22 @@ export function renderPagination(container, { page = 1, pageSize = 20, total = 0
   const prevBtn = document.createElement('button');
   prevBtn.className = 'page-btn';
   prevBtn.textContent = '← Previous';
+  prevBtn.setAttribute('aria-label', 'Previous Page');
   prevBtn.disabled = page <= 1;
   prevBtn.onclick = () => onChange && onChange(page - 1);
   wrapper.appendChild(prevBtn);
 
   const info = document.createElement('span');
   info.className = 'page-info';
-  info.textContent = `Page ${page} of ${totalPages} (${total} items)`;
+  const totalDisplay = total > 0 ? ` of ${totalPages} (${total} items)` : '';
+  info.textContent = `Page ${page}${totalDisplay}`;
   wrapper.appendChild(info);
 
   const nextBtn = document.createElement('button');
   nextBtn.className = 'page-btn';
   nextBtn.textContent = 'Next →';
-  nextBtn.disabled = page >= totalPages;
+  nextBtn.setAttribute('aria-label', 'Next Page');
+  nextBtn.disabled = hasMore !== undefined ? !hasMore : page >= totalPages;
   nextBtn.onclick = () => onChange && onChange(page + 1);
   wrapper.appendChild(nextBtn);
 

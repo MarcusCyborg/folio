@@ -42,7 +42,7 @@ export async function renderDocumentDetail(container, routeContext) {
 
   container.innerHTML = `
     <div class="public-page" style="padding-top: 1rem;">
-      <a href="#/library" class="back-link">← Back to Library Catalog</a>
+      <a href="#/library" class="back-link" id="detailBackLink">← Back to Library Catalog</a>
       <div id="detailLoading" style="text-align: center; padding: 4rem;">
         <span class="spinner"></span>
         <p style="color: var(--color-muted); margin-top: 1rem;">Loading document...</p>
@@ -275,6 +275,17 @@ export async function renderDocumentDetail(container, routeContext) {
           });
         });
       }
+    }
+
+    // Hook up Back to Library link to preserve previous search state if available in history
+    const backLink = container.querySelector('#detailBackLink');
+    if (backLink) {
+      backLink.onclick = (e) => {
+        if (window.history.length > 1) {
+          e.preventDefault();
+          window.history.back();
+        }
+      };
     }
 
     // Hook up Like / Unlike button with idempotency and pending state
