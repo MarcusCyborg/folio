@@ -15,8 +15,9 @@
 | :--- | :--- | :--- |
 | **Mandatory Worktree** | `F:/dpl13.10/WikiSearchEngine-ia-fix` | Dedicated integration worktree |
 | **Integration Branch** | `codex/integration-a-remediation` | Local integration branch (no push, no merge to main) |
-| **Current Tested HEAD SHA** | `4024c3eff071ea4fc9dd5f5fa76b7735af1a60c6` | Commit prior to R04.5 checkpoint fixes |
-| **Final R04.5 Commit SHA** | `262d28961907657651b39478ceacebcc288dff55` | Checkpoint remediation commit incorporating conftest & signature fixes |
+| **Pre-R04.5 Baseline HEAD SHA** | `4024c3eff071ea4fc9dd5f5fa76b7735af1a60c6` | Commit prior to R04.5 checkpoint fixes |
+| **R04.5 Code Remediation Commit SHA** | `f0be234358114b4bb732e65877c8fbff6d96ee77` | Checkpoint remediation commit incorporating conftest & signature fixes |
+| **Final R04.5 Checkpoint Commit SHA** | `fa005d4471690fefdc363bc99074de6e9dc41e2d` | Final checkpoint commit on `codex/integration-a-remediation` |
 | **Merge Base (Common Ancestor)**| `c4b19cffa676b4437e7346da2c410b198b04dc2c` | Common parent of P01 and P02 |
 | **P01 Source Branch Ref** | `740eb5f1cc5f6b0c90480310e37a36234086a726` | `feature/p01-security` |
 | **P02 Source Branch Ref** | `1ac72ad8a9e979682ddad8253c0d6d3e49222055` | `feature/p02-clean-setup` |
