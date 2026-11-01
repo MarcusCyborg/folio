@@ -78,6 +78,7 @@ def get_current_user(
     if not user or not user.is_active:
         if user:
             revoke_user_sessions(db, user.id)
+            db.commit()
         raise AppException(
             status_code=403,
             code="ACCOUNT_DISABLED",
