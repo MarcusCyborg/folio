@@ -32,6 +32,7 @@ from src.backend.api.library import router as library_router
 from src.backend.api.engagement import router as engagement_router
 from src.backend.api.events import router as events_router
 from src.backend.api.admin import router as admin_router
+from src.backend.api.search import router as search_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -150,6 +151,7 @@ app.include_router(library_router, prefix="/api/v1")
 app.include_router(engagement_router, prefix="/api/v1")
 app.include_router(events_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
+app.include_router(search_router, prefix="/api/v1")
 
 # Admin documents preview alias at /admin/documents/preview
 from src.backend.core.dependencies import require_permission

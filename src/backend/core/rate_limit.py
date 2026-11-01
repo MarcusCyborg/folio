@@ -130,12 +130,18 @@ def build_register_ip_key(client_ip: str) -> str:
     return f"register:ip:{ip_h}"
 
 
+def build_search_ip_key(client_ip: str) -> str:
+    """Builds a hashed key for IP-wide search requests."""
+    ip_h = hash_identifier(client_ip)
+    return f"search:ip:{ip_h}"
+
+
 def normalize_bucket_key(identifier: str, default_prefix: str = "bucket") -> str:
     """
     Normalizes an identifier into a safe, bounded bucket key.
     If already formatted and <= 64 chars, preserves it; otherwise hashes it.
     """
-    if identifier.startswith(("login:", "register:")) and len(identifier) <= 64:
+    if identifier.startswith(("login:", "register:", "search:")) and len(identifier) <= 64:
         return identifier
     digest = hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:32]
     return f"{default_prefix}:{digest}"
@@ -351,6 +357,96 @@ class PostgresRateLimiter:
         """
         key_hash = build_register_ip_key(client_ip)
         action = "register_ip"
+
+        with self._session_scope() as session:
+            now_epoch, is_pg = self._get_db_time_and_dialect(session)
+            cutoff = now_epoch - window_seconds
+
+            if is_pg:
+                session.execute(
+                    text(
+                        """
+                        INSERT INTO rate_limit_buckets (key_hash, action, attempts, created_at, updated_at)
+                        VALUES (:key_hash, :action, '[]'::jsonb, clock_timestamp(), clock_timestamp())
+                        ON CONFLICT (key_hash) DO NOTHING;
+                        """
+                    ),
+                    {"key_hash": key_hash, "action": action}
+                )
+                row = session.execute(
+                    text("SELECT attempts FROM rate_limit_buckets WHERE key_hash = :key_hash FOR UPDATE;"),
+                    {"key_hash": key_hash}
+                ).fetchone()
+            else:
+                session.execute(
+                    text(
+                        """
+                        INSERT INTO rate_limit_buckets (key_hash, action, attempts, created_at, updated_at)
+                        VALUES (:key_hash, :action, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        ON CONFLICT (key_hash) DO NOTHING;
+                        """
+                    ),
+                    {"key_hash": key_hash, "action": action}
+                )
+                row = session.execute(
+                    text("SELECT attempts FROM rate_limit_buckets WHERE key_hash = :key_hash;"),
+                    {"key_hash": key_hash}
+                ).fetchone()
+
+            raw_attempts = row[0] if row and row[0] is not None else []
+            if isinstance(raw_attempts, str):
+                try:
+                    raw_attempts = json.loads(raw_attempts)
+                except Exception:
+                    raw_attempts = []
+
+            active = [t for t in raw_attempts if isinstance(t, (int, float)) and t > cutoff]
+
+            if len(active) >= max_attempts:
+                oldest = min(active) if active else now_epoch
+                retry_after = max(1, int(math.ceil(oldest + window_seconds - now_epoch)))
+                session.commit()
+                return RateLimitResult(
+                    allowed=False,
+                    retry_after=retry_after,
+                    current_count=len(active),
+                    limit=max_attempts
+                )
+
+            active.append(now_epoch)
+            update_sql = (
+                "UPDATE rate_limit_buckets SET attempts = :attempts, updated_at = clock_timestamp() WHERE key_hash = :key_hash;"
+                if is_pg else
+                "UPDATE rate_limit_buckets SET attempts = :attempts, updated_at = CURRENT_TIMESTAMP WHERE key_hash = :key_hash;"
+            )
+            session.execute(
+                text(update_sql),
+                {"attempts": json.dumps(active), "key_hash": key_hash}
+            )
+            session.commit()
+            return RateLimitResult(
+                allowed=True,
+                retry_after=0,
+                current_count=len(active),
+                limit=max_attempts
+            )
+
+    def check_and_record_search_attempt(
+        self,
+        client_ip: str,
+        max_attempts: Optional[int] = None,
+        window_seconds: Optional[int] = None,
+    ) -> RateLimitResult:
+        """
+        Atomically checks and records a search request attempt for client_ip.
+        """
+        if not getattr(settings, "RATE_LIMIT_ENABLED", True):
+            return RateLimitResult(allowed=True, retry_after=0, current_count=0, limit=999)
+
+        max_attempts = max_attempts or getattr(settings, "RATE_LIMIT_SEARCH_MAX", 60)
+        window_seconds = window_seconds or getattr(settings, "RATE_LIMIT_SEARCH_WINDOW_SECONDS", 60)
+        key_hash = build_search_ip_key(client_ip)
+        action = "search_ip"
 
         with self._session_scope() as session:
             now_epoch, is_pg = self._get_db_time_and_dialect(session)

@@ -67,6 +67,21 @@ class Settings:
         self.RATE_LIMIT_LOGIN_WINDOW_SECONDS: int = int(os.getenv("RATE_LIMIT_LOGIN_WINDOW_SECONDS", "60"))
         self.RATE_LIMIT_REGISTER_MAX: int = int(os.getenv("RATE_LIMIT_REGISTER_MAX", "10"))
         self.RATE_LIMIT_REGISTER_WINDOW_SECONDS: int = int(os.getenv("RATE_LIMIT_REGISTER_WINDOW_SECONDS", "60"))
+        self.RATE_LIMIT_SEARCH_MAX: int = int(os.getenv("RATE_LIMIT_SEARCH_MAX", "60"))
+        self.RATE_LIMIT_SEARCH_WINDOW_SECONDS: int = int(os.getenv("RATE_LIMIT_SEARCH_WINDOW_SECONDS", "60"))
+
+        # P05 Search & Semantic Engine Configuration
+        self.SEARCH_CONTEXT_TTL_MINUTES: int = int(os.getenv("SEARCH_CONTEXT_TTL_MINUTES", "15"))
+        self.SEARCH_TIMEOUT_SECONDS: float = float(os.getenv("SEARCH_TIMEOUT_SECONDS", "5.0"))
+        self.CHROMA_PATH: str = os.getenv("CHROMA_PATH", str(PROJECT_ROOT / "data" / "vector"))
+        self.CHROMA_COLLECTION_NAME: str = os.getenv("CHROMA_COLLECTION_NAME", "wiki_ai_english")
+        self.EMBEDDING_MODEL_NAME: str = os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
+        self.RRF_K: int = int(os.getenv("RRF_K", "60"))
+        self.W_SPARSE_HIGH: float = float(os.getenv("W_SPARSE_HIGH", "1.0"))
+        self.W_DENSE_HIGH: float = float(os.getenv("W_DENSE_HIGH", "1.0"))
+        self.W_SPARSE_LOW: float = float(os.getenv("W_SPARSE_LOW", "0.1"))
+        self.RRF_LAMBDA: float = float(os.getenv("RRF_LAMBDA", "2.0932"))
+        self.COSINE_THRESHOLD: float = float(os.getenv("COSINE_THRESHOLD", "0.658"))
 
     def reload(self):
         """Reload settings from environment (useful in tests when os.environ is mutated)."""
