@@ -1,0 +1,22 @@
+[
+  {
+    "antipattern": "side-tab",
+    "name": "Side-tab accent border",
+    "description": "Thick colored border on one side of a card — the most recognizable tell of AI-generated UIs. Use a subtler accent or remove it entirely.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "F:\\dpl13.10\\WikiSearchEngine-github\\src\\frontend\\public\\public.css",
+    "line": 257,
+    "snippet": "border-left: 4px solid #D4AC0D"
+  },
+  {
+    "antipattern": "side-tab",
+    "name": "Side-tab accent border",
+    "description": "Thick colored border on one side of a card — the most recognizable tell of AI-generated UIs. Use a subtler accent or remove it entirely.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "F:\\dpl13.10\\WikiSearchEngine-github\\src\\frontend\\public\\public.css",
+    "line": 722,
+    "snippet": "border-left: 4px solid var(--color-accent)"
+  }
+]

@@ -1,0 +1,80 @@
+FFFFFF                                                                   [100%]
+================================== FAILURES ===================================
+_____________ test_review_disk_update_visible_to_existing_reader ______________
+tests\backend\search\test_integration_review_probe.py:21: in test_review_disk_update_visible_to_existing_reader
+    assert engine.get_or_load_index(index.generation_id, tmp_path).total_docs == 2
+E   AssertionError: assert 1 == 2
+E    +  where 1 = <src.backend.search.index.InvertedIndex object at 0x0000013E96BAE7D0>.total_docs
+E    +    where <src.backend.search.index.InvertedIndex object at 0x0000013E96BAE7D0> = get_or_load_index('review-cache', WindowsPath('C:/Users/Admin/AppData/Local/Temp/pytest-of-Admin/pytest-45/test_review_disk_update_visibl0'))
+E    +      where get_or_load_index = <src.backend.search.engine.SearchEngine object at 0x0000013E96BADEA0>.get_or_load_index
+E    +      and   'review-cache' = <src.backend.search.index.InvertedIndex object at 0x0000013E96B85CC0>.generation_id
+---------------------------- Captured stdout setup ----------------------------
+[conftest] Running 'alembic upgrade head' on test database...
+[conftest] Alembic migrations completed successfully.
+[conftest] Seeding test database fixtures...
+Seeding roles and permissions...
+Seeding settings...
+Seeding local demo users...
+Seeding taxonomy and documents...
+Seed complete. Database now contains: 5 users, 100 published documents, 3 drafts, 6 categories, 123 tags.
+[conftest] Test database seeded and ready.
+---------------------------- Captured stderr setup ----------------------------
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> efeaa3d84c9b, initial_folio_schema
+INFO  [alembic.runtime.migration] Running upgrade efeaa3d84c9b -> 20261031_click_unique, click_idempotency_unique
+INFO  [alembic.runtime.migration] Running upgrade 20261031_click_unique -> 20261101_rate_limit, add_rate_limit_buckets_table
+INFO  [alembic.runtime.migration] Running upgrade 20261101_rate_limit -> 20261101_index_lifecycle, index_lifecycle_schema
+_________ test_review_dense_candidates_obey_category_filter[semantic] _________
+tests\backend\search\test_integration_review_probe.py:36: in test_review_dense_candidates_obey_category_filter
+    assert other.id not in [item["id"] for item in response.json()["items"]]
+E   AssertionError: assert '8282314e-b3bb-5416-8b4a-ebeaec173915' not in ['8282314e-b3bb-5416-8b4a-ebeaec173915']
+E    +  where '8282314e-b3bb-5416-8b4a-ebeaec173915' = <src.backend.models.document.Document object at 0x0000013E96CC5810>.id
+__________ test_review_dense_candidates_obey_category_filter[hybrid] __________
+tests\backend\search\test_integration_review_probe.py:36: in test_review_dense_candidates_obey_category_filter
+    assert other.id not in [item["id"] for item in response.json()["items"]]
+E   AssertionError: assert '8282314e-b3bb-5416-8b4a-ebeaec173915' not in ['1327fe80-9661-5fc0-8aa6-023751991e36', '8282314e-b3bb-5416-8b4a-ebeaec173915', '8c77f838-e433-5d76-b7a2-7bb6d4177826...24da-9f22-511a-9694-a0bce374a136', '975bb407-fbad-5593-a646-1dcf3ce23696', '608a2ae1-0bca-5736-a3bb-e01d0255602d', ...]
+E    +  where '8282314e-b3bb-5416-8b4a-ebeaec173915' = <src.backend.models.document.Document object at 0x0000013E9813EE00>.id
+_____________ test_review_fallback_declaration_survives_next_page _____________
+tests\backend\search\test_integration_review_probe.py:54: in test_review_fallback_declaration_survives_next_page
+    assert second.json()["engine_used"] == "fallback_bm25"
+E   AssertionError: assert 'semantic' == 'fallback_bm25'
+E     
+E     - fallback_bm25
+E     + semantic
+_________ test_review_tag_edit_job_matches_committed_document[False] __________
+tests\backend\search\test_integration_review_probe.py:77: in test_review_tag_edit_job_matches_committed_document
+    assert job.revision_hash == compute_doc_instance_hash(doc)
+E   AssertionError: assert '2b42b40ceb3a...9d4b389e4c55b' == '152b475b9651...c255ba5e078d4'
+E     
+E     - 152b475b965186439e4e80c257703bcb518acdc521a9ffffae1c255ba5e078d4
+E     + 2b42b40ceb3a444dbbb59494aa7cdb219f1d92281d14d9384b59d4b389e4c55b
+__________ test_review_tag_edit_job_matches_committed_document[True] __________
+tests\backend\search\test_integration_review_probe.py:77: in test_review_tag_edit_job_matches_committed_document
+    assert job.revision_hash == compute_doc_instance_hash(doc)
+E   AssertionError: assert '7e857d3e44c4...6e5105e2201fb' == '152b475b9651...c255ba5e078d4'
+E     
+E     - 152b475b965186439e4e80c257703bcb518acdc521a9ffffae1c255ba5e078d4
+E     + 7e857d3e44c41573fce8fc11c7764e3fa568ed664ec640ac8196e5105e2201fb
+============================== warnings summary ===============================
+..\folio-live-runtime\venv-clean\lib\site-packages\fastapi\testclient.py:1
+  F:\dpl13.10\folio-live-runtime\venv-clean\lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/backend/search/test_integration_review_probe.py::test_review_disk_update_visible_to_existing_reader
+  F:\dpl13.10\folio-live-runtime\venv-clean\lib\site-packages\alembic\config.py:604: DeprecationWarning: No path_separator found in configuration; falling back to legacy splitting on spaces, commas, and colons for prepend_sys_path.  Consider adding path_separator=os to Alembic config.
+    util.warn_deprecated(
+
+tests/backend/search/test_integration_review_probe.py::test_review_disk_update_visible_to_existing_reader
+  F:\dpl13.10\folio-live-runtime\venv-clean\lib\site-packages\alembic\config.py:552: DeprecationWarning: The version_path_separator configuration parameter is deprecated; please use path_separator
+    util.warn_deprecated(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/backend/search/test_integration_review_probe.py::test_review_disk_update_visible_to_existing_reader
+FAILED tests/backend/search/test_integration_review_probe.py::test_review_dense_candidates_obey_category_filter[semantic]
+FAILED tests/backend/search/test_integration_review_probe.py::test_review_dense_candidates_obey_category_filter[hybrid]
+FAILED tests/backend/search/test_integration_review_probe.py::test_review_fallback_declaration_survives_next_page
+FAILED tests/backend/search/test_integration_review_probe.py::test_review_tag_edit_job_matches_committed_document[False]
+FAILED tests/backend/search/test_integration_review_probe.py::test_review_tag_edit_job_matches_committed_document[True]
+6 failed, 3 warnings in 12.35s

@@ -1,0 +1,55 @@
+F....                                                                    [100%]
+================================== FAILURES ===================================
+_____________ test_review_tag_edit_job_matches_committed_document _____________
+tests\backend\search\test_integration_review_probe.py:74: in test_review_tag_edit_job_matches_committed_document
+    assert job.revision_hash == compute_doc_instance_hash(doc)
+E   AssertionError: assert '0af574a11b5e...da0c4db6a58a4' == '357055fed6e6...17a86344cf602'
+E     
+E     - 357055fed6e66036cb243243965c063c7352285e44160c2dc2717a86344cf602
+E     + 0af574a11b5eb2dea3ae3f23f68e5e4b38120d7d8279ab7a9edda0c4db6a58a4
+---------------------------- Captured stdout setup ----------------------------
+[conftest] Running 'alembic upgrade head' on test database...
+[conftest] Alembic migrations completed successfully.
+[conftest] Seeding test database fixtures...
+Seeding roles and permissions...
+Seeding settings...
+Seeding local demo users...
+Seeding taxonomy and documents...
+Seed complete. Database now contains: 5 users, 100 published documents, 3 drafts, 6 categories, 123 tags.
+[conftest] Test database seeded and ready.
+---------------------------- Captured stderr setup ----------------------------
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> efeaa3d84c9b, initial_folio_schema
+INFO  [alembic.runtime.migration] Running upgrade efeaa3d84c9b -> 20261031_click_unique, click_idempotency_unique
+INFO  [alembic.runtime.migration] Running upgrade 20261031_click_unique -> 20261101_rate_limit, add_rate_limit_buckets_table
+INFO  [alembic.runtime.migration] Running upgrade 20261101_rate_limit -> 20261101_index_lifecycle, index_lifecycle_schema
+============================== warnings summary ===============================
+..\folio-live-runtime\venv-clean\lib\site-packages\fastapi\testclient.py:1
+  F:\dpl13.10\folio-live-runtime\venv-clean\lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/backend/search/test_integration_review_probe.py::test_review_tag_edit_job_matches_committed_document
+tests/security/test_bootstrap_postgres_lifecycle.py::TestLivePostgresBootstrapLifecycle::test_live_cli_create_rerun_rotate_and_negative_matrix
+tests/safety/test_db_lifecycle.py::TestLiveDatabaseLifecycle::test_live_provision_migrate_seed_and_teardown
+  F:\dpl13.10\folio-live-runtime\venv-clean\lib\site-packages\alembic\config.py:604: DeprecationWarning: No path_separator found in configuration; falling back to legacy splitting on spaces, commas, and colons for prepend_sys_path.  Consider adding path_separator=os to Alembic config.
+    util.warn_deprecated(
+
+tests/backend/search/test_integration_review_probe.py::test_review_tag_edit_job_matches_committed_document
+tests/security/test_bootstrap_postgres_lifecycle.py::TestLivePostgresBootstrapLifecycle::test_live_cli_create_rerun_rotate_and_negative_matrix
+tests/safety/test_db_lifecycle.py::TestLiveDatabaseLifecycle::test_live_provision_migrate_seed_and_teardown
+  F:\dpl13.10\folio-live-runtime\venv-clean\lib\site-packages\alembic\config.py:552: DeprecationWarning: The version_path_separator configuration parameter is deprecated; please use path_separator
+    util.warn_deprecated(
+
+tests/security/test_bootstrap_postgres_lifecycle.py::TestLivePostgresBootstrapLifecycle::test_live_cli_create_rerun_rotate_and_negative_matrix
+  F:\dpl13.10\folio-live-runtime\venv-clean\lib\site-packages\_pytest\fixtures.py:1392: PytestRemovedIn10Warning: Class-scoped fixtures defined as instance methods are deprecated.
+  Instance attributes set in the 'live_pg_db' fixture will NOT be visible to test methods,
+  as each test gets a new instance while the fixture runs only once per class.
+  Use a @classmethod decorator below @pytest.fixture and set attributes on cls instead.
+  See https://docs.pytest.org/en/stable/deprecations.html#class-scoped-fixture-as-instance-method
+    fixturefunc = resolve_fixture_function(fixturedef, request)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/backend/search/test_integration_review_probe.py::test_review_tag_edit_job_matches_committed_document
+1 failed, 4 passed, 8 warnings in 19.28s
