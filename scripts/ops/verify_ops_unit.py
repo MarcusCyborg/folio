@@ -21,6 +21,14 @@ from src.backend.models.search_index import IndexJob
 from src.backend.search_index.worker import IndexWorker
 from scripts.ops.backup import perform_backup, compute_sha256
 from scripts.ops.restore import perform_restore, verify_checksums, BackupIntegrityError
+from scripts.ops.init_certs import (
+    generate_self_signed_cert,
+    verify_certificates,
+    CertificateError,
+    CertificateNotFoundError,
+    CertificateKeyMismatchError,
+    CertificateExpiredError,
+)
 
 
 def run_checks():
@@ -152,6 +160,97 @@ def run_checks():
         except BackupIntegrityError:
             pass
         results.append("test_restore_tamper_detection: PASSED")
+
+    # 11. Gitattributes Line Endings Safeguard Unit Test (P08-P2-01)
+    ga_path = PROJECT_ROOT / ".gitattributes"
+    assert ga_path.exists(), "Missing .gitattributes"
+    ga_text = ga_path.read_text(encoding="utf-8")
+    assert "*.sh" in ga_text and "eol=lf" in ga_text, ".gitattributes must enforce *.sh text eol=lf"
+    for sh_file in PROJECT_ROOT.rglob("*.sh"):
+        if ".git" in sh_file.parts:
+            continue
+        assert b"\r" not in sh_file.read_bytes(), f"CRLF carriage return detected in {sh_file}"
+    results.append("test_gitattributes_line_endings_safeguard: PASSED")
+
+    # 12. SSL Certificate Generation & Verification Unit Test (P08-P2-02)
+    with tempfile.TemporaryDirectory() as tmp_cert:
+        p_cert = Path(tmp_cert)
+        cert_res = generate_self_signed_cert(
+            cert_dir=p_cert,
+            domain="unit-test.folio.local",
+            staging_domain="staging.unit-test.local",
+            days=90,
+        )
+        assert cert_res["status"] == "valid"
+        assert (p_cert / "folio.crt").exists()
+        assert (p_cert / "folio.key").exists()
+        assert "CN=unit-test.folio.local" in cert_res["subject"]
+        assert "unit-test.folio.local" in cert_res["sans"]
+        assert "127.0.0.1" in cert_res["sans"]
+        assert cert_res["days_remaining"] >= 89
+
+        v_res = verify_certificates(p_cert)
+        assert v_res["status"] == "valid"
+        assert v_res["sha256_fingerprint"] == cert_res["sha256_fingerprint"]
+        results.append("test_ssl_certificate_generation_and_verification: PASSED")
+
+    # 13. SSL Certificate Tamper, Expiry & Key Mismatch Detection (P08-P2-02)
+    with tempfile.TemporaryDirectory() as tmp_cert_tamper:
+        p_tamper = Path(tmp_cert_tamper)
+        # 13a. Missing files
+        try:
+            verify_certificates(p_tamper)
+            raise AssertionError("Should fail on missing cert files")
+        except CertificateNotFoundError:
+            pass
+
+        # 13b. Generate valid and tamper key
+        generate_self_signed_cert(cert_dir=p_tamper, domain="tamper.folio.local")
+        with tempfile.TemporaryDirectory() as tmp_other:
+            p_other = Path(tmp_other)
+            generate_self_signed_cert(cert_dir=p_other, domain="other.folio.local")
+            # Replace key with mismatched key
+            (p_tamper / "folio.key").write_bytes((p_other / "folio.key").read_bytes())
+            try:
+                verify_certificates(p_tamper)
+                raise AssertionError("Should fail on key mismatch")
+            except CertificateKeyMismatchError:
+                pass
+
+        # 13c. Expired certificate
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        expired_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        now_utc = datetime.now(timezone.utc)
+        expired_cert = (
+            x509.CertificateBuilder()
+            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "expired.local")]))
+            .issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "expired.local")]))
+            .public_key(expired_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now_utc - timedelta(days=400))
+            .not_valid_after(now_utc - timedelta(days=35))
+            .sign(expired_key, hashes.SHA256())
+        )
+        with tempfile.TemporaryDirectory() as tmp_exp:
+            p_exp = Path(tmp_exp)
+            (p_exp / "folio.crt").write_bytes(expired_cert.public_bytes(serialization.Encoding.PEM))
+            (p_exp / "folio.key").write_bytes(
+                expired_key.private_bytes(
+                    serialization.Encoding.PEM,
+                    serialization.PrivateFormat.PKCS8,
+                    serialization.NoEncryption(),
+                )
+            )
+            try:
+                verify_certificates(p_exp)
+                raise AssertionError("Should fail on expired cert")
+            except CertificateExpiredError:
+                pass
+
+        results.append("test_ssl_certificate_tamper_and_expiry_detection: PASSED")
 
     for r in results:
         print(f"  [OK] {r}")

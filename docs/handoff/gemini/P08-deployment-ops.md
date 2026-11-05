@@ -47,6 +47,7 @@ Key achievements:
 - [`docs/acceptance-matrix.md`](file:///F:/dpl13.10/WikiSearchEngine-github/docs/acceptance-matrix.md): Updated acceptance status for `OPS-05`, `OPS-06`, and `OPS-07`.
 
 ### New Files Created
+- [`.gitattributes`](file:///F:/dpl13.10/WikiSearchEngine-github/.gitattributes): Repository line ending configuration enforcing LF (`eol=lf`) for all `*.sh` scripts to prevent `/bin/bash^M` container failures.
 - [`Dockerfile`](file:///F:/dpl13.10/WikiSearchEngine-github/Dockerfile): Multi-stage, reproducible, non-root `folio:folio` (UID 10001), pinned dependencies via `constraints.txt`.
 - [`.dockerignore`](file:///F:/dpl13.10/WikiSearchEngine-github/.dockerignore): Production Docker build ignore filter excluding secrets, venvs, caches, and test artifacts.
 - [`.env.production.example`](file:///F:/dpl13.10/WikiSearchEngine-github/.env.production.example): Exhaustive production/staging configuration template.
@@ -58,6 +59,8 @@ Key achievements:
 - [`docker/proxy/templates/default.conf.template`](file:///F:/dpl13.10/WikiSearchEngine-github/docker/proxy/templates/default.conf.template): Nginx virtual host with SSL, HTTP->HTTPS redirect, CSP, and trusted proxy headers.
 - [`docker/proxy/Caddyfile`](file:///F:/dpl13.10/WikiSearchEngine-github/docker/proxy/Caddyfile): Alternative Caddy reverse proxy configuration.
 - [`scripts/run_worker.py`](file:///F:/dpl13.10/WikiSearchEngine-github/scripts/run_worker.py): Worker CLI runner script.
+- [`scripts/ops/init_certs.py`](file:///F:/dpl13.10/WikiSearchEngine-github/scripts/ops/init_certs.py): Reverse proxy SSL certificate generator and validator for `folio-proxy-certs`.
+- [`scripts/ops/init_certs.sh`](file:///F:/dpl13.10/WikiSearchEngine-github/scripts/ops/init_certs.sh): POSIX bash wrapper for SSL certificate initialization.
 - [`scripts/ops/backup.py`](file:///F:/dpl13.10/WikiSearchEngine-github/scripts/ops/backup.py): Automated disaster recovery backup generator with SHA-256 manifest.
 - [`scripts/ops/backup.sh`](file:///F:/dpl13.10/WikiSearchEngine-github/scripts/ops/backup.sh): POSIX bash backup wrapper.
 - [`scripts/ops/restore.py`](file:///F:/dpl13.10/WikiSearchEngine-github/scripts/ops/restore.py): Automated disaster recovery restore and smoke testing tool.
@@ -68,6 +71,7 @@ Key achievements:
 - [`tests/backend/ops/test_request_logging_and_security.py`](file:///F:/dpl13.10/WikiSearchEngine-github/tests/backend/ops/test_request_logging_and_security.py): Unit tests for Request ID, security headers, and query redaction.
 - [`tests/backend/ops/test_worker_daemon.py`](file:///F:/dpl13.10/WikiSearchEngine-github/tests/backend/ops/test_worker_daemon.py): Unit tests for worker daemon lifecycle and crash lock recovery.
 - [`tests/backend/ops/test_backup_restore.py`](file:///F:/dpl13.10/WikiSearchEngine-github/tests/backend/ops/test_backup_restore.py): Unit tests for backup manifest creation and restore tamper detection.
+- [`tests/backend/ops/test_ssl_and_gitattributes.py`](file:///F:/dpl13.10/WikiSearchEngine-github/tests/backend/ops/test_ssl_and_gitattributes.py): Unit tests for `.gitattributes` line ending safeguard and SSL certificate initialization.
 - [`docs/handoff/gemini/P08-deployment-ops.md`](file:///F:/dpl13.10/WikiSearchEngine-github/docs/handoff/gemini/P08-deployment-ops.md): This comprehensive handoff document.
 
 ---
@@ -122,6 +126,19 @@ cp .env.production.example .env.production
 chmod 600 .env.production
 # Edit .env.production to set APP_SECRET, POSTGRES_PASSWORD, and DOMAIN_NAME
 ```
+
+### Step 1b: Reverse Proxy SSL Certificate Precondition & Initialization
+The reverse proxy (`folio-proxy`) mounts `folio-proxy-certs:/etc/nginx/certs:ro` and requires `folio.crt` and `folio.key` on boot.
+Initialize self-signed staging certificates prior to launching core services:
+```bash
+# Generate self-signed certificates with SANs for localhost, 127.0.0.1, and domain
+python3 scripts/ops/init_certs.py --cert-dir ./docker/proxy/certs
+
+# Populate into the Docker named volume folio-proxy-certs:
+docker volume create folio-proxy-certs
+docker run --rm -v folio-proxy-certs:/certs -v $(pwd)/docker/proxy/certs:/src alpine cp /src/folio.crt /src/folio.key /certs/
+```
+*Note: In production environments, place valid Let's Encrypt or CA-signed certificates directly into `folio-proxy-certs`.*
 
 ### Step 2: Build Images
 ```bash
@@ -206,6 +223,15 @@ Folio separates health probes into three distinct levels:
 ---
 
 ## 7. HTTPS Reverse Proxy & Security Headers
+
+### 7.1 SSL Certificate Precondition & Initialization (`folio-proxy-certs`)
+- **Required Files:** `/etc/nginx/certs/folio.crt` (certificate chain) and `/etc/nginx/certs/folio.key` (RSA private key).
+- **Volume Mount:** Mounted read-only (`folio-proxy-certs:/etc/nginx/certs:ro`) into the Nginx container.
+- **Fail-Fast Behavior:** If certificate files are absent from `folio-proxy-certs`, the Nginx master process will exit on boot with a configuration test error.
+- **Remediation CLI (`scripts/ops/init_certs.py` / `init_certs.sh`):**
+  - Generates RSA-2048 self-signed certificate with Subject Alternative Names (SANs) for `${DOMAIN_NAME}`, `${STAGING_DOMAIN}`, `localhost`, `127.0.0.1`, and `::1`.
+  - Non-mutating pre-flight verification via `--check-only` validates expiration, PEM format, and cryptographic key matching.
+  - POSIX bash wrapper `scripts/ops/init_certs.sh` enforces LF line endings.
 
 ### Nginx Virtual Host (`docker/proxy/templates/default.conf.template`)
 - **HTTP (Port 80):**
@@ -292,6 +318,8 @@ python scripts/ops/validate_compose_and_config.py
   + Entrypoints verified: web, worker (migration-free), one-shot migration runner
   + Reverse Proxy: HTTP-to-HTTPS redirect, X-Forwarded-*, CSP, and trusted proxy headers verified
   + .dockerignore: excludes secrets, .git, test artifacts, and local data
+  + .gitattributes: strictly enforces *.sh text eol=lf across all POSIX shell scripts
+  + SSL Certificate Precondition: init_certs.py & init_certs.sh verified for proxy service
 ```
 
 ### Verification Command 4: Operations & Disaster Recovery Pure Unit Suite
@@ -310,8 +338,11 @@ python scripts/ops/verify_ops_unit.py
   [OK] test_worker_daemon_max_iterations: PASSED
   [OK] test_backup_restore_cycle: PASSED
   [OK] test_restore_tamper_detection: PASSED
+  [OK] test_gitattributes_line_endings_safeguard: PASSED
+  [OK] test_ssl_certificate_generation_and_verification: PASSED
+  [OK] test_ssl_certificate_tamper_and_expiry_detection: PASSED
 
-All 10 ops & disaster recovery unit tests PASSED successfully!
+All 13 ops & disaster recovery unit tests PASSED successfully!
 ```
 
 ### Verification Command 5: Full Pytest Backend & Frontend Matrix
@@ -337,6 +368,8 @@ python -m pytest tests/frontend -q
 | **Request Logging & Request ID** | **PASS** | `src/backend/core/middleware.py`, `verify_ops_unit.py` | Monotonic latency, `X-Request-ID`, sensitive query redaction |
 | **Worker Daemon & Lifecycle** | **PASS** | `src/backend/search_index/worker.py`, `scripts/run_worker.py` | Crash lock recovery, lag tracking, DLQ reporting, SIGTERM stop |
 | **Disaster Recovery Backup/Restore** | **PASS** | `scripts/ops/backup.py`, `restore.py`, `verify_ops_unit.py` | SHA-256 manifest, database dump/restore, index rebuild on loss |
+| **Line Endings Safeguard (`.gitattributes`)** | **PASS** | `.gitattributes`, `validate_compose_and_config.py` | Enforces `*.sh text eol=lf` to prevent `/bin/bash^M` container errors |
+| **Proxy SSL Certificate Tooling (`init_certs`)** | **PASS** | `scripts/ops/init_certs.py`, `init_certs.sh` | Self-signed staging generator, SANs, key-match validation |
 | **Live Docker Runtime on Current Windows Host** | **BLOCKED_ENV** | `docker --version` -> CommandNotFoundException | Docker daemon is not installed on this Windows environment |
 | **Public Domain / Hosting Verification** | **UNVERIFIED** | Cloud hosting / public DNS intentionally not provisioned | Self-contained templates prepared for Linux host deployment |
 

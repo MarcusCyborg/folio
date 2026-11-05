@@ -8,9 +8,12 @@ entrypoints, and multi-stage Dockerfile invariants without requiring Docker daem
 import os
 import sys
 import yaml
+import tempfile
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 
 def validate():
@@ -107,6 +110,35 @@ def validate():
     for secret_pat in [".env", ".git", "test-results", "data/"]:
         assert secret_pat in dig_content, f".dockerignore must ignore {secret_pat}"
     checks.append(".dockerignore: excludes secrets, .git, test artifacts, and local data")
+
+    # 10. Gitattributes line endings check
+    gitattributes_path = PROJECT_ROOT / ".gitattributes"
+    assert gitattributes_path.exists(), "Missing .gitattributes in repository root"
+    ga_content = gitattributes_path.read_text(encoding="utf-8")
+    assert "*.sh" in ga_content and "eol=lf" in ga_content, ".gitattributes must enforce *.sh text eol=lf"
+    for sh_file in PROJECT_ROOT.rglob("*.sh"):
+        if ".git" in sh_file.parts:
+            continue
+        assert b"\r" not in sh_file.read_bytes(), f"Shell script {sh_file} contains CRLF carriage return bytes"
+    checks.append(".gitattributes: strictly enforces *.sh text eol=lf across all POSIX shell scripts")
+
+    # 11. Reverse proxy SSL certificate tooling check
+    init_certs_py = PROJECT_ROOT / "scripts" / "ops" / "init_certs.py"
+    init_certs_sh = PROJECT_ROOT / "scripts" / "ops" / "init_certs.sh"
+    assert init_certs_py.exists(), "Missing scripts/ops/init_certs.py"
+    assert init_certs_sh.exists(), "Missing scripts/ops/init_certs.sh"
+    assert b"\r" not in init_certs_sh.read_bytes(), "init_certs.sh must have LF line endings"
+
+    from scripts.ops.init_certs import generate_self_signed_cert, verify_certificates
+    with tempfile.TemporaryDirectory() as tmp_cert_dir:
+        tmp_p = Path(tmp_cert_dir)
+        cert_info = generate_self_signed_cert(tmp_p, domain="validate.local")
+        assert cert_info["status"] == "valid"
+        assert (tmp_p / "folio.crt").exists()
+        assert (tmp_p / "folio.key").exists()
+        verified = verify_certificates(tmp_p)
+        assert verified["status"] == "valid"
+    checks.append("SSL Certificate Precondition: init_certs.py & init_certs.sh verified for proxy service")
 
     print("\n[OK] All Configuration & Topology Audits Passed:")
     for c in checks:
