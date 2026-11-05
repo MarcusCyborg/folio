@@ -10,6 +10,7 @@ from src.backend.models.document import Document, DocumentTag
 from src.backend.models.taxonomy import Category, Tag
 from src.backend.models.auth import User
 from src.backend.search_index.outbox import record_revision_and_outbox_job
+from src.backend.core.wiki_content import clean_wikipedia_content
 
 
 def generate_doc_uuid_from_url(url: str) -> str:
@@ -115,6 +116,7 @@ class CorpusImporter:
             source_url = (item.get("source_url") or item.get("url") or "").strip()
             title = (item.get("title") or "").strip()
             content = (item.get("content") or item.get("text") or "").strip()
+            content = clean_wikipedia_content(content, source_url)
             summary = (item.get("summary") or "").strip()
 
             # Validate minimum requirements

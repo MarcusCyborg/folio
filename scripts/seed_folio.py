@@ -12,6 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.backend.core.config import settings
+from src.backend.core.wiki_content import clean_wikipedia_content
 from src.backend.core.database import SessionLocal, engine as default_engine
 from src.backend.core.security import hash_password
 from src.backend.models.auth import Role, Permission, RolePermission, User
@@ -168,7 +169,7 @@ def seed_taxonomy_and_documents(db: Session):
                     id=doc_id,
                     title=item["title"],
                     summary=item["summary"],
-                    content=item["content"],
+                    content=clean_wikipedia_content(item["content"], source_url),
                     category_id=category.id,
                     author=item.get("author", "Wikipedia contributors"),
                     created_by=admin_id,

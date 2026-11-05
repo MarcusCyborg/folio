@@ -20,6 +20,10 @@ import uuid
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.backend.core.wiki_content import clean_wikipedia_content
+
 RAW_DATA_PATH = PROJECT_ROOT / "data" / "raw" / "wiki_crawler_dataset.jsonl"
 EXTRA_DATA_PATH = PROJECT_ROOT / "fixtures" / "folio" / "fetched_extra.json"
 OUTPUT_FILE = PROJECT_ROOT / "fixtures" / "folio" / "documents.jsonl"
@@ -372,7 +376,7 @@ def run_curation():
             raise RuntimeError(f"Missing required article in raw corpus: {req_title}")
 
         url = art["url"]
-        content = art["text"]
+        content = clean_wikipedia_content(art["text"], url)
         title = norm_req
         doc_id = str(uuid.uuid5(uuid.NAMESPACE_URL, url))
 

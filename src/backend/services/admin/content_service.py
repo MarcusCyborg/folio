@@ -10,6 +10,7 @@ from src.backend.models.auth import User
 from src.backend.core.audit import write_audit
 from src.backend.core.exceptions import AppException
 from src.backend.core.sanitizer import render_and_sanitize_markdown
+from src.backend.core.wiki_content import clean_wikipedia_content
 from src.backend.schemas.library import Taxon
 from src.backend.schemas.admin import DocumentWrite, CategoryWrite, TagWrite, CategoryUpdate, TagUpdate
 from src.backend.search_index.outbox import (
@@ -79,12 +80,13 @@ def admin_get_document(db: Session, doc_id: str) -> dict:
         raise AppException(status_code=404, code="DOCUMENT_NOT_FOUND", message="Document not found")
 
     tags_list = [Taxon(id=dt.tag.id, name=dt.tag.name, slug=dt.tag.slug) for dt in doc.document_tags]
+    content = clean_wikipedia_content(doc.content, doc.source_url)
     return {
         "id": doc.id,
         "title": doc.title,
         "summary": doc.summary,
-        "content": doc.content,
-        "rendered_content": render_and_sanitize_markdown(doc.content),
+        "content": content,
+        "rendered_content": render_and_sanitize_markdown(content),
         "author": doc.author,
         "status": doc.status,
         "created_by": doc.created_by,

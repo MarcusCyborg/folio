@@ -60,7 +60,7 @@ def test_real_import_maps_source_url_to_id_idempotently(db_session: Session, tmp
     data = [
         {
             "title": "Neural Architecture Search",
-            "content": "Neural architecture search (NAS) is a technique for automating the design of artificial neural networks.",
+            "content": "## Overview\n\n[edit]\n\nNeural architecture search (NAS) is a technique for automating the design of artificial neural networks.",
             "url": url,
             "category_slug": "artificial-intelligence",
             "tags": ["machine-learning", "automl"],
@@ -81,6 +81,7 @@ def test_real_import_maps_source_url_to_id_idempotently(db_session: Session, tmp
     assert imported_doc.title == "Neural Architecture Search"
     assert imported_doc.author == "Wikipedia contributors"
     assert imported_doc.source_license == "CC BY-SA 4.0"
+    assert imported_doc.content == "## Overview\n\nNeural architecture search (NAS) is a technique for automating the design of artificial neural networks."
 
     # Outbox job & revision created
     rev = db_session.query(DocumentRevision).filter(DocumentRevision.document_id == imported_doc.id).first()

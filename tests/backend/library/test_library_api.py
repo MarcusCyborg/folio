@@ -81,6 +81,25 @@ def test_document_detail_and_sanitization(client, db_session):
     res_draft = client.get(f"/api/v1/documents/{draft.id}")
     assert res_draft.status_code == 404
 
+def test_legacy_wikipedia_edit_controls_are_cleaned_on_read(client, db_session):
+    from src.backend.services.admin.content_service import admin_get_document
+
+    doc = db_session.get(Document, "5968c38e-b185-5854-93dc-47b7843be819")
+    raw_content = "## Background\n\n[edit]\n\nKeep the word edit in prose."
+    doc.content = raw_content
+    db_session.flush()
+
+    response = client.get(f"/api/v1/documents/{doc.id}")
+    assert response.status_code == 200
+    for data in (response.json(), admin_get_document(db_session, doc.id)):
+        assert data["content"] == "## Background\n\nKeep the word edit in prose."
+        assert "[edit]" not in data["rendered_content"]
+        assert "<h2>Background</h2>" in data["rendered_content"]
+        assert "Keep the word edit in prose." in data["rendered_content"]
+    db_session.refresh(doc)
+    assert doc.content == raw_content  # Reading must not mutate stored revisions.
+
+
 def test_view_event_idempotency(client, db_session):
     doc = db_session.query(Document).filter(Document.status == "published").first()
     initial_views = doc.views_count

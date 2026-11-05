@@ -44,7 +44,7 @@ from scripts.seed_folio import (
 )
 
 FIXTURE_PATH = PROJECT_ROOT / "fixtures" / "folio" / "documents.jsonl"
-EXPECTED_SHA256 = "379271ec6ade8afaec0ba3dc836d8334f6defea76020813e07c7f4e568be9af6"
+EXPECTED_SHA256 = "dc197eff2de35dcb6c889eb81660e261013996c31fd5e67edd951f22d0010648"
 
 
 class TestFixtureIntegrityAndRealCounts:
