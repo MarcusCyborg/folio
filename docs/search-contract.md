@@ -26,7 +26,7 @@
 ### 1.2 Fixture Ground Truth & Preservation (No 165/162 Claims)
 - **Canonical Seed Fixture:** [`fixtures/folio/documents.jsonl`](file:///F:/dpl13.10/WikiSearchEngine-ia-fix/fixtures/folio/documents.jsonl)
 - **Exact Document Count:** **Exactly 103 documents** (100 `status: "published"`, 3 `status: "draft"`).
-- **Exact Fixture SHA256:** `5413a1f6265dc5f4ccea0081356690e54bd63ed78c6b63ad1fee9025b4183abe`.
+- **Exact Fixture SHA256 (LF line endings):** `379271ec6ade8afaec0ba3dc836d8334f6defea76020813e07c7f4e568be9af6`.
 - **UUID Composition:** 103 of 103 documents (100%) possess **UUIDv5** identifiers.
 - **Source URL Mapping:** 103 of 103 documents possess distinct, unique `source_url` values.
 - **Taxonomy Counts in Fixture:** 6 categories (`artificial-intelligence`, `computational-biology`, `neuroscience`, `quantum-computing`, `renewable-energy`, `robotics`) and 154 unique tags.

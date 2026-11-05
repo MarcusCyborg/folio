@@ -59,8 +59,9 @@ def test_production_boot_fails_on_insecure_cookie():
         settings.APP_SECRET = original_secret
         settings.COOKIE_SECURE = original_cookie_secure
 
-def test_production_boot_fails_on_wildcard_cors():
+def test_production_boot_fails_on_wildcard_cors(monkeypatch):
     """Real app boot fails fast in production if CORS origins contain wildcard '*'."""
+    monkeypatch.setattr(settings, "DATABASE_URL", "postgresql+psycopg://folio_prod_user:prod_pass_987@127.0.0.1:5432/folio_prod")
     original_env = settings.APP_ENV
     original_secret = settings.APP_SECRET
     original_cookie_secure = settings.COOKIE_SECURE
@@ -336,8 +337,9 @@ def test_security_headers_present(client):
     assert "style-src 'self' 'unsafe-inline'" in csp
     assert "frame-ancestors 'none'" in csp
 
-def test_production_error_zero_leak():
+def test_production_error_zero_leak(monkeypatch):
     """In production, unhandled 500 exceptions do not leak stack traces or exception details."""
+    monkeypatch.setattr(settings, "DATABASE_URL", "postgresql+psycopg://folio_prod_user:prod_pass_987@127.0.0.1:5432/folio_prod")
     original_env = settings.APP_ENV
     original_secret = settings.APP_SECRET
     original_cookie_secure = settings.COOKIE_SECURE

@@ -262,8 +262,9 @@ class TestSessionRevocationAndDisabledUser:
 
 
 class TestProductionErrorRedaction:
-    def test_production_unhandled_error_zero_leak(self):
+    def test_production_unhandled_error_zero_leak(self, monkeypatch):
         """In production environment, unhandled 500 exceptions redact internal database details and credentials."""
+        monkeypatch.setattr(settings, "DATABASE_URL", "postgresql+psycopg://folio_prod_user:prod_pass_987@127.0.0.1:5432/folio_prod")
         orig_env = settings.APP_ENV
         orig_secret = settings.APP_SECRET
         orig_cookie_secure = settings.COOKIE_SECURE

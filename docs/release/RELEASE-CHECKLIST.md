@@ -29,7 +29,7 @@
   - `src/backend/services/admin/governance_service.py`: Enforces last active super-admin invariant.
   - `src/backend/services/library/engagement_service.py`: Threaded comments, mentions, idempotent likes.
   - `src/backend/core/sanitizer.py`: Bleach HTML sanitization for user inputs and previews.
-  - `fixtures/folio/documents.jsonl` & `scripts/seed_folio.py`: Idempotent seed loading 103 items (100 published, 3 drafts, SHA-256: `5413a1f6...`).
+  - `fixtures/folio/documents.jsonl` & `scripts/seed_folio.py`: Idempotent seed loading 103 items (100 published, 3 drafts, SHA-256: `379271ec...`).
 - **Gate Status:** **PASSED** *(Code verified, 118 safety/security tests and backend test suites verified in CI; live PG blocked on local host)*
 
 ### Gate G2 — Phase 2 Core Retrieval Pipeline & Logging

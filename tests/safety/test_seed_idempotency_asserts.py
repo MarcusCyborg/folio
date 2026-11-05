@@ -44,7 +44,7 @@ from scripts.seed_folio import (
 )
 
 FIXTURE_PATH = PROJECT_ROOT / "fixtures" / "folio" / "documents.jsonl"
-EXPECTED_SHA256 = "5413a1f6265dc5f4ccea0081356690e54bd63ed78c6b63ad1fee9025b4183abe"
+EXPECTED_SHA256 = "379271ec6ade8afaec0ba3dc836d8334f6defea76020813e07c7f4e568be9af6"
 
 
 class TestFixtureIntegrityAndRealCounts:
@@ -53,7 +53,8 @@ class TestFixtureIntegrityAndRealCounts:
     def test_fixture_hash_and_real_item_counts(self):
         assert FIXTURE_PATH.exists(), f"Fixture file not found: {FIXTURE_PATH}"
 
-        raw_bytes = FIXTURE_PATH.read_bytes()
+        # Normalize older Windows checkouts; the tracked fixture uses LF.
+        raw_bytes = FIXTURE_PATH.read_bytes().replace(b"\r\n", b"\n")
         computed_sha256 = hashlib.sha256(raw_bytes).hexdigest()
         assert computed_sha256 == EXPECTED_SHA256, (
             f"Fixture SHA256 changed! Expected {EXPECTED_SHA256}, got {computed_sha256}. "
