@@ -1,22 +1,24 @@
 import os
 import sys
 import json
+import argparse
 from pathlib import Path
 from datetime import datetime, timezone
-from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import func, create_engine
 
 # Ensure project root in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.backend.core.config import settings
-from src.backend.core.database import SessionLocal
+from src.backend.core.database import SessionLocal, engine as default_engine
 from src.backend.core.security import hash_password
 from src.backend.models.auth import Role, Permission, RolePermission, User
 from src.backend.models.taxonomy import Category, Tag
 from src.backend.models.document import Document, DocumentTag
 from src.backend.models.system import AppSetting, AuditLog
+from src.backend.search_index.outbox import record_revision_and_outbox_job
 
 ROLES_CATALOG = [
     ("member", "Library Member"),
@@ -84,9 +86,9 @@ def seed_settings(db: Session):
             db.add(AppSetting(key=k, value=v))
     db.flush()
 
-def seed_demo_users(db: Session):
-    if settings.APP_ENV == "production":
-        print("Skipping local demo accounts seeding in production environment.")
+def seed_demo_users(db: Session, skip: bool = False):
+    if skip or settings.APP_ENV in ("production", "staging"):
+        print(f"Skipping local demo accounts seeding in {settings.APP_ENV} environment.")
         return
 
     password = settings.DEMO_PASSWORD
@@ -188,30 +190,65 @@ def seed_taxonomy_and_documents(db: Session):
                 for tag_obj in doc_tag_objs:
                     db.add(DocumentTag(document_id=doc.id, tag_id=tag_obj.id))
 
+                record_revision_and_outbox_job(db, doc)
+
     db.flush()
 
-def run_seed():
-    db = SessionLocal()
-    try:
-        print("Seeding roles and permissions...")
-        seed_roles_and_permissions(db)
-        print("Seeding settings...")
-        seed_settings(db)
-        print("Seeding local demo users...")
-        seed_demo_users(db)
-        print("Seeding taxonomy and documents...")
-        seed_taxonomy_and_documents(db)
-        
-        # Add audit log for system seeding
-        admin_user = db.query(User).filter(User.username == "admin").first()
-        db.add(AuditLog(
-            actor_id=admin_user.id if admin_user else None,
-            action="system.seed",
-            entity_type="system",
-            entity_id="init",
-            after={"timestamp": datetime.now(timezone.utc).isoformat()}
-        ))
+def seed_database_all(db: Session, skip_demo_users: bool = False, auto_commit: bool = False):
+    """Executes all seed stages within a session.
+
+    If auto_commit is False (default when caller provides Session),
+    flushes changes but leaves transaction commit/rollback to caller.
+    """
+    print("Seeding roles and permissions...")
+    seed_roles_and_permissions(db)
+    print("Seeding settings...")
+    seed_settings(db)
+    print("Seeding local demo users...")
+    seed_demo_users(db, skip=skip_demo_users)
+    print("Seeding taxonomy and documents...")
+    seed_taxonomy_and_documents(db)
+
+    # Add audit log for system seeding
+    admin_user = db.query(User).filter(User.username == "admin").first()
+    db.add(AuditLog(
+        actor_id=admin_user.id if admin_user else None,
+        action="system.seed",
+        entity_type="system",
+        entity_id="init",
+        after={"timestamp": datetime.now(timezone.utc).isoformat()}
+    ))
+    if auto_commit:
         db.commit()
+    else:
+        db.flush()
+
+def run_seed(target=None, db_url=None, skip_demo_users: bool = False):
+    """
+    Idempotent seeding entry point.
+    target can be:
+      - None (uses settings.DATABASE_URL via default SessionLocal)
+      - a Session instance (caller manages lifecycle and transaction ownership; run_seed will not commit)
+      - an Engine instance (run_seed creates an isolated session, commits on success, rollbacks on error)
+    db_url can be a database URL string (run_seed creates an engine and session, commits on success).
+    skip_demo_users: bool (if True, demo users are skipped; in production/staging they are always skipped).
+    """
+    if isinstance(target, Session):
+        seed_database_all(target, skip_demo_users=skip_demo_users, auto_commit=False)
+        return
+
+    owned_engine = None
+    if target is not None and hasattr(target, "connect"):
+        session_factory = sessionmaker(autocommit=False, autoflush=False, bind=target)
+    elif db_url:
+        owned_engine = create_engine(db_url, pool_pre_ping=True)
+        session_factory = sessionmaker(autocommit=False, autoflush=False, bind=owned_engine)
+    else:
+        session_factory = SessionLocal
+
+    db = session_factory()
+    try:
+        seed_database_all(db, skip_demo_users=skip_demo_users, auto_commit=True)
         
         # Report totals
         user_count = db.query(User).count()
@@ -226,6 +263,22 @@ def run_seed():
         raise
     finally:
         db.close()
+        if owned_engine:
+            owned_engine.dispose()
+
+def main():
+    parser = argparse.ArgumentParser(description="Folio Dataset & Taxonomy Seeding CLI")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--db-url", type=str, default=None, help="Explicit database URL to seed")
+    group.add_argument("--test", action="store_true", help="Seed TEST_DATABASE_URL instead of primary DATABASE_URL")
+    parser.add_argument("--no-demo-users", action="store_true", help="Skip demo user account creation")
+    args = parser.parse_args()
+
+    target_url = args.db_url
+    if args.test:
+        target_url = settings.TEST_DATABASE_URL
+
+    run_seed(db_url=target_url, skip_demo_users=args.no_demo_users)
 
 if __name__ == "__main__":
-    run_seed()
+    main()

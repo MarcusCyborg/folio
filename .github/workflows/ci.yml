@@ -1,0 +1,156 @@
+name: Folio CI
+
+on:
+  push:
+    branches: [ main, "feature/**", "codex/**" ]
+  pull_request:
+    branches: [ main, "feature/**", "codex/**" ]
+  workflow_dispatch:
+
+jobs:
+  backend-and-database:
+    name: Backend Tests & Database Verification
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+          POSTGRES_DB: folio
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Create clean virtual environment
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+
+      - name: Install backend dependencies with constraints
+        run: |
+          source venv/bin/activate
+          pip install -r requirements.txt -r requirements-dev.txt -c constraints.txt
+          pip check
+
+      - name: Configure and verify direct PostgreSQL endpoint
+        env:
+          POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+        run: |
+          source venv/bin/activate
+          python scripts/configure_ci_database.py
+
+      - name: Verify migration on clean database
+        run: |
+          source venv/bin/activate
+          alembic upgrade head
+
+      - name: Verify database seeding idempotency (seed 2 times with assertions)
+        env:
+          APP_ENV: test
+        run: |
+          source venv/bin/activate
+          python scripts/verify_seed_idempotency.py
+
+      - name: Run automated safety, security and backend test suite
+        env:
+          APP_ENV: test
+          APP_SECRET: test_secret_key_32bytes_minimum_for_tests_12345
+        run: |
+          source venv/bin/activate
+          pytest tests/safety tests/security tests/backend --ignore=tests/safety/test_artifact_isolation.py -v --junitxml=test-results/junit-backend.xml
+
+      - name: Upload Backend Test Report & Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-results
+          path: |
+            test-results/junit-backend.xml
+            test-results/artifacts/
+
+  frontend-e2e:
+    name: Frontend E2E & Browser Verification
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+          POSTGRES_DB: folio
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Create clean virtual environment
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+
+      - name: Install browser testing dependencies with constraints
+        run: |
+          source venv/bin/activate
+          pip install -r requirements-browser.txt -c constraints.txt
+          pip check
+
+      - name: Configure and verify direct PostgreSQL endpoint
+        env:
+          POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+        run: |
+          source venv/bin/activate
+          python scripts/configure_ci_database.py
+
+      - name: Install Playwright Chromium with dependencies
+        run: |
+          source venv/bin/activate
+          python -m playwright install --with-deps chromium
+
+      - name: Run Playwright Frontend E2E Test Suite
+        env:
+          APP_ENV: test
+          APP_SECRET: test_secret_key_32bytes_minimum_for_tests_12345
+        run: |
+          source venv/bin/activate
+          pytest --noconftest tests/safety/test_artifact_isolation.py -v --junitxml=test-results/junit-artifact.xml
+          pytest tests/frontend -v --junitxml=test-results/junit-frontend.xml
+
+      - name: Upload Frontend Test Results & Failure Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-test-results
+          path: |
+            test-results/junit-frontend.xml
+            test-results/junit-artifact.xml
+            test-results/artifacts/

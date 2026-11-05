@@ -10,6 +10,7 @@ from src.backend.core.session import (
     create_session,
     get_session_by_token,
     set_session_cookie,
+    revoke_user_sessions,
 )
 from src.backend.core.exceptions import AppException
 from src.backend.models.auth import SessionModel, User, RolePermission
@@ -45,7 +46,6 @@ def get_session_context(
 
     # Validate CSRF for state-modifying HTTP methods
     if request.method in ("POST", "PUT", "PATCH", "DELETE"):
-        # Allow requests with header X-CSRF-Token matching session.csrf_token
         client_csrf = request.headers.get("X-CSRF-Token")
         if not client_csrf or not constant_time_compare(client_csrf, session_obj.csrf_token):
             raise AppException(
@@ -76,6 +76,9 @@ def get_current_user(
     # Reload fresh user from DB to catch immediate deactivations or role changes
     user = db.query(User).filter(User.id == ctx.user.id).first()
     if not user or not user.is_active:
+        if user:
+            revoke_user_sessions(db, user.id)
+            db.commit()
         raise AppException(
             status_code=403,
             code="ACCOUNT_DISABLED",

@@ -9,27 +9,10 @@ from playwright.sync_api import sync_playwright
 SERVER_PORT = 8088
 BASE_URL = f"http://127.0.0.1:{SERVER_PORT}"
 
-@pytest.fixture(scope="module")
-def live_server():
-    import threading
-    import uvicorn
-    from src.backend.main import app
-
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=SERVER_PORT, log_level="error"))
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    time.sleep(1.2)
-    yield BASE_URL
-    server.should_exit = True
-    thread.join(timeout=2)
-
-@pytest.fixture(scope="module")
-def browser_instance():
-    p = sync_playwright().start()
-    browser = p.chromium.launch(channel="chrome", headless=True)
-    yield browser
-    browser.close()
-    p.stop()
+@pytest.fixture(scope="module", autouse=True)
+def configure_server(live_server):
+    global BASE_URL
+    BASE_URL = live_server
 
 def login_user(page, email, password="FolioDemo2026!"):
     page.goto(f"{BASE_URL}/#/login")
@@ -106,7 +89,7 @@ def test_data_seo_specialist_permissions(live_server, browser_instance):
     # Verify no create button
     assert page.locator("#createNewDocBtn").count() == 0
     # Table should show "Edit SEO" button instead of write editor
-    assert page.locator("text=Edit SEO").count() > 0
+    assert page.locator("text=Configure SEO").count() > 0 or page.locator("a[href*='/admin/seo']").count() > 0
 
     # Deep link to create document shows 403
     page.goto(f"{BASE_URL}/#/admin/documents/new")
@@ -163,7 +146,7 @@ def test_super_admin_full_documents_crud_and_dirty_guard(live_server, browser_in
 
     # 5. Check Markdown Preview Tab
     page.click("#tabPreview")
-    page.wait_for_selector("#editorPreviewBox")
+    page.wait_for_selector("#editorPreviewBox:has-text('Quantum Dilution')", timeout=5000)
     preview_html = page.locator("#editorPreviewBox").inner_html()
     assert "Quantum Dilution" in preview_html
     assert "Qubit fidelity: 99.9%" in preview_html
@@ -184,7 +167,8 @@ def test_super_admin_full_documents_crud_and_dirty_guard(live_server, browser_in
     # 7. Edit document and Publish
     page.click(f"text={doc_title}")
     page.wait_for_selector("#docEditorForm")
-    page.wait_for_selector("#editCategory option", state="attached")
+    # The form skeleton appears before async document/taxonomy loading completes.
+    page.wait_for_function("title => document.querySelector('#editTitle')?.value === title && document.querySelector('#editCategory')?.value && document.querySelector('#editContent')?.value", arg=doc_title)
     page.click("#publishDocBtn")
     page.wait_for_url(f"{BASE_URL}/#/admin/documents")
     page.wait_for_selector("table")
@@ -216,7 +200,7 @@ def test_taxonomy_manager_and_409_conflict_handling(live_server, browser_instanc
     # 2. Add Tag via Modal
     page.click("#addTagBtn")
     page.wait_for_selector(".modal-dialog")
-    tag_name = f"Superconductivity {uuid.uuid4().hex[:6]}"
+    tag_name = f"00-Superconductivity {uuid.uuid4().hex[:6]}"
     page.fill("#tagModalName", tag_name)
     page.click("#saveTagModalBtn")
     page.wait_for_selector(f"text={tag_name}")

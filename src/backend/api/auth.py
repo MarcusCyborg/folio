@@ -1,8 +1,9 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Response, Request, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
+from src.backend.core.config import settings
 from src.backend.core.database import get_db
 from src.backend.core.dependencies import (
     get_session_context,
@@ -17,6 +18,13 @@ from src.backend.core.session import (
 )
 from src.backend.core.security import hash_password, verify_password
 from src.backend.core.exceptions import AppException
+from src.backend.core.rate_limit import (
+    rate_limiter,
+    get_client_ip,
+    build_login_target_key,
+    build_login_ip_key,
+    RateLimitStoreUnavailableError,
+)
 from src.backend.models.auth import User
 from src.backend.models.system import AppSetting
 from src.backend.schemas.auth import (
@@ -34,6 +42,10 @@ def user_to_user_self(user: Optional[User], db: Session) -> Optional[UserSelf]:
     if not user:
         return None
     effective = sorted(list(get_effective_permissions(db, user.role_key)))
+    created_at = user.created_at
+    if created_at is None:
+        from src.backend.models.base import utcnow
+        created_at = utcnow()
     return UserSelf(
         id=user.id,
         email=user.email,
@@ -41,29 +53,56 @@ def user_to_user_self(user: Optional[User], db: Session) -> Optional[UserSelf]:
         display_name=user.display_name,
         bio=user.bio,
         role_key=user.role_key,
-        permissions=effective,
         is_active=user.is_active,
+        permissions=effective,
+        created_at=created_at,
         commenting_suspended_until=user.commenting_suspended_until,
-        created_at=user.created_at,
     )
 
 @router.get("/session", response_model=SessionResponse)
-def get_session(
+def get_current_session(
     ctx: SessionContext = Depends(get_session_context),
     db: Session = Depends(get_db),
 ):
-    """Returns the current user profile (or null if guest) and CSRF token."""
-    user_self = user_to_user_self(ctx.user, db)
-    return SessionResponse(user=user_self, csrf_token=ctx.csrf_token)
+    """Returns the current session details (authenticated or guest)."""
+    return SessionResponse(
+        user=user_to_user_self(ctx.user, db),
+        csrf_token=ctx.session.csrf_token,
+    )
 
 @router.post("/register", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
 def register(
     data: RegisterRequest,
+    request: Request,
     response: Response,
     ctx: SessionContext = Depends(get_session_context),
     db: Session = Depends(get_db),
 ):
     """Registers a new user account with role 'member'."""
+    client_ip = get_client_ip(request)
+
+    # Check registration rate limit
+    if settings.RATE_LIMIT_ENABLED:
+        try:
+            reg_res = rate_limiter.check_and_record_register(
+                client_ip,
+                max_attempts=settings.RATE_LIMIT_REGISTER_MAX,
+                window_seconds=settings.RATE_LIMIT_REGISTER_WINDOW_SECONDS,
+            )
+            if not reg_res:
+                raise AppException(
+                    status_code=429,
+                    code="TOO_MANY_REQUESTS",
+                    message="Too many registration attempts. Please wait before trying again.",
+                    headers={"Retry-After": str(reg_res.retry_after)},
+                )
+        except RateLimitStoreUnavailableError as exc:
+            raise AppException(
+                status_code=503,
+                code="RATE_LIMIT_UNAVAILABLE",
+                message="Registration rate-limiting service temporarily unavailable. Please try again later.",
+            ) from exc
+
     # Check registration_enabled setting
     setting = db.query(AppSetting).filter(AppSetting.key == "registration_enabled").first()
     if setting and setting.value is False:
@@ -120,15 +159,59 @@ def register(
 @router.post("/login", response_model=SessionResponse)
 def login(
     data: LoginRequest,
+    request: Request,
     response: Response,
     ctx: SessionContext = Depends(get_session_context),
     db: Session = Depends(get_db),
 ):
     """Authenticates with email and password, rotating the session cookie and CSRF token."""
     normalized_email = data.email.strip().lower()
+    client_ip = get_client_ip(request)
+    rate_limit_user_key = build_login_target_key(client_ip, normalized_email)
+    rate_limit_ip_key = build_login_ip_key(client_ip)
+
+    if settings.RATE_LIMIT_ENABLED:
+        try:
+            target_res = rate_limiter.check_login_rate_limit(
+                rate_limit_user_key,
+                max_failed=settings.RATE_LIMIT_LOGIN_MAX_FAILED,
+                window_seconds=settings.RATE_LIMIT_LOGIN_WINDOW_SECONDS,
+            )
+            ip_res = rate_limiter.check_login_rate_limit(
+                rate_limit_ip_key,
+                max_failed=settings.RATE_LIMIT_LOGIN_MAX_FAILED * 3,
+                window_seconds=settings.RATE_LIMIT_LOGIN_WINDOW_SECONDS,
+            )
+            if not target_res or not ip_res:
+                retry_after = max(target_res.retry_after, ip_res.retry_after, 1)
+                raise AppException(
+                    status_code=429,
+                    code="TOO_MANY_REQUESTS",
+                    message="Too many failed login attempts. Please wait before trying again.",
+                    headers={"Retry-After": str(retry_after)},
+                )
+        except RateLimitStoreUnavailableError as exc:
+            raise AppException(
+                status_code=503,
+                code="RATE_LIMIT_UNAVAILABLE",
+                message="Authentication rate-limiting service temporarily unavailable. Please try again later.",
+            ) from exc
+
     user = db.query(User).filter(func.lower(User.email) == normalized_email).first()
 
     if not user or not verify_password(data.password, user.password_hash):
+        if settings.RATE_LIMIT_ENABLED:
+            try:
+                rate_limiter.record_failed_logins(
+                    [rate_limit_user_key, rate_limit_ip_key],
+                    window_seconds=settings.RATE_LIMIT_LOGIN_WINDOW_SECONDS,
+                )
+            except RateLimitStoreUnavailableError as exc:
+                raise AppException(
+                    status_code=503,
+                    code="RATE_LIMIT_UNAVAILABLE",
+                    message="Authentication rate-limiting service temporarily unavailable. Please try again later.",
+                ) from exc
         raise AppException(
             status_code=401,
             code="INVALID_CREDENTIALS",
@@ -141,6 +224,15 @@ def login(
             code="ACCOUNT_DISABLED",
             message="Your account has been deactivated",
         )
+
+    # Successful login: reset failed login attempts for this target account only.
+    # Note: rate_limit_ip_key is deliberately NOT reset here!
+    # Success on one account must not wipe IP-wide abuse limits or other account counters.
+    if settings.RATE_LIMIT_ENABLED:
+        try:
+            rate_limiter.record_successful_login(rate_limit_user_key)
+        except RateLimitStoreUnavailableError:
+            pass
 
     new_session, raw_token = rotate_session(db, ctx.session, user=user)
     db.commit()

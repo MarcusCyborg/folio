@@ -1,0 +1,16 @@
+================================================================================
+FOLIO RETRIEVAL EVALUATION & BENCHMARK HARNESS (P06)
+Timestamp: 2026-11-01T15:47:06.341798+00:00
+Workspace: F:\dpl13.10\WikiSearchEngine-github
+================================================================================
+
+[STEP 1/5] DATASET INTEGRITY & COVERAGE VALIDATION
+  Corpus Documents  : 103 (100 published, 3 drafts)
+  Benchmark Queries : 30 (24 positive, 6 negative)
+  Category Balance  : {'exact_title': 6, 'multi_term': 6, 'natural_language': 6, 'ambiguous': 6, 'negative': 6}
+  Splits            : {'test': 20, 'tune': 10}
+  Oracle P@10 Upper : 0.3208
+  Oracle Recall@10  : 1.0000
+  Oracle MAP@10     : 1.0000
+  Status: VALIDATION PASSED (Zero integrity violations)
+

@@ -1,0 +1,126 @@
+{
+  "integrated_source_sha": "ba4f628cbdc5bc1214f0e6d26d4120eed0747b9d",
+  "parents": [
+    "f19891f70a582b2f43dcf6f160be59217451c2d2",
+    "4aaa6cc6abe42914d10d0c8de82025653fa253f3"
+  ],
+  "target": "F:\\dpl13.10\\WikiSearchEngine-github",
+  "branch": "codex/integration-b",
+  "backup": "F:\\dpl13.10\\folio-integration-backup-20261101",
+  "source_imports": {
+    "p07": "f19891f70a582b2f43dcf6f160be59217451c2d2",
+    "p06": "4aaa6cc6abe42914d10d0c8de82025653fa253f3"
+  },
+  "displaced_files": [
+    {
+      "path": "docs/acceptance-matrix.md",
+      "backup_sha256": "30d0b12bb6b155d1b46374cfb886bc9df44e9adcc5dd2ac06ff0a9edac579875",
+      "same_as_imported": false
+    },
+    {
+      "path": "docs/handoff/gemini/CLONE-REPORT.md",
+      "backup_sha256": "5b8429b3a59b134ce24575f3729f1b40636155c481eddab269952837367b5483",
+      "same_as_imported": false
+    },
+    {
+      "path": "docs/handoff/gemini/P00-baseline.md",
+      "backup_sha256": "060feed46b094ced231df7b5f4370eb893f46ae405152bac81beaed6344c16ba",
+      "same_as_imported": false
+    },
+    {
+      "path": "docs/handoff/gemini/P01-production-security.md",
+      "backup_sha256": "b50fd503457261a542d0444fb1b1389c78f591f32a922cad7ff041a9773582ab",
+      "same_as_imported": false
+    },
+    {
+      "path": "docs/handoff/review/evidence-20261101-cf1bdce021/backend-junit.xml",
+      "backup_sha256": "9f661babfcc10f186b74a818ed8bea04e3df8301a7d9393a7aee83718edf03b4",
+      "same_as_imported": true
+    },
+    {
+      "path": "docs/handoff/review/evidence-20261101-cf1bdce021/checks.json",
+      "backup_sha256": "7b26a2bc0651343aa5e96a6bdfde3dadcc0fdcc70e1381deff6052857ef8e32b",
+      "same_as_imported": true
+    },
+    {
+      "path": "docs/handoff/review/evidence-20261101-cf1bdce021/guard-contract.json",
+      "backup_sha256": "a0cb796a3754199e0f01d80b4dc51d0dededfbc8b474834f615e51d3efeb9cff",
+      "same_as_imported": true
+    },
+    {
+      "path": "docs/handoff/review/evidence-20261101-cf1bdce021/main-probe.json",
+      "backup_sha256": "6311ceba6eb9d2da0ef00d50cca66dd59ae388aacf4de71942ae03950433578a",
+      "same_as_imported": true
+    },
+    {
+      "path": "docs/handoff/review/evidence-20261101-cf1bdce021/p01-probe.json",
+      "backup_sha256": "bae47736731fd402651f907113972a6a5cc8380a88c6eeffcecb03e5139130e3",
+      "same_as_imported": true
+    },
+    {
+      "path": "docs/handoff/review/evidence-20261101-cf1bdce021/pip-freeze.txt",
+      "backup_sha256": "f89a096e51cbd787ebcb6c0978d151177915eb64a6be52e5610fe6d930ad57f6",
+      "same_as_imported": true
+    },
+    {
+      "path": "docs/handoff/review/evidence-20261101-cf1bdce021/probe_guard_contract.py",
+      "backup_sha256": "c6e0b904e52418141d25e9fd4eef1355d0168ddc27eb7c6e0a5c63e238c5452f",
+      "same_as_imported": false
+    },
+    {
+      "path": "docs/handoff/review/evidence-20261101-cf1bdce021/probe_runtime.py",
+      "backup_sha256": "a9ecd8389d3e60a8166f96b2a533aeb9c840820933ee6a998da91983f2158b73",
+      "same_as_imported": false
+    },
+    {
+      "path": "docs/handoff/review/evidence-20261101-cf1bdce021/pyvenv.cfg.txt",
+      "backup_sha256": "2037db424714d6ac83095004e67d2a742dc636c0c07e37cd237cb7755db711c5",
+      "same_as_imported": true
+    },
+    {
+      "path": "docs/handoff/review/evidence-20261101-cf1bdce021/remote-ci.json",
+      "backup_sha256": "9603a8ccc5921463dde8e77d3b6783d2f6792a150e38259eab70826a5903a041",
+      "same_as_imported": true
+    },
+    {
+      "path": "docs/handoff/review/evidence-20261101-cf1bdce021/run_checks.py",
+      "backup_sha256": "65a64004abc7dcae2f68a8b0c3a011272b22391dce12cbbb6e3ee55310050e9a",
+      "same_as_imported": false
+    },
+    {
+      "path": "docs/handoff/review/evidence-20261101-cf1bdce021/source-manifest.json",
+      "backup_sha256": "3cb1bf212b71c2c9ec5d9559ae77d66c36d3779df10a3e1dd441184261ebe81d",
+      "same_as_imported": true
+    },
+    {
+      "path": "docs/handoff/review/GEMINI-INTEGRATION-A-FIX-PROMPTS.md",
+      "backup_sha256": "439ed7e5256375402e3d82edb86b9161552070f34ac7376ccacd01d372dcc8bd",
+      "same_as_imported": false
+    },
+    {
+      "path": "docs/handoff/review/INTEGRATION-A-REMEDIATION-PLAN.md",
+      "backup_sha256": "dd9a154f15b43e2160c6a23ff5cc5ab0b39675984f13007451489d497eaf4d60",
+      "same_as_imported": false
+    },
+    {
+      "path": "docs/handoff/review/INTEGRATION-A-REVIEW.md",
+      "backup_sha256": "8ae66b5442241aeab295f3e251f41c436ebc20cb553e6fd8e141d6e2a9d58858",
+      "same_as_imported": false
+    },
+    {
+      "path": "docs/search-contract.md",
+      "backup_sha256": "34350661398ab3db6dc91546807e3650aa90da2a88dc6602ec67c417987432d4",
+      "same_as_imported": false
+    },
+    {
+      "path": "FOLIO-COMPLETION-PLAN.md",
+      "backup_sha256": "5693d8df722a51cccd320c6043dfebf619a70b72dc32327311e0ad57bfc007b7",
+      "same_as_imported": false
+    },
+    {
+      "path": "GEMINI-EXECUTION-PROMPTS.md",
+      "backup_sha256": "9c56f1f132046dae5f65aa7f33918c4fa15d77d1424bb3d1ee257bf608f2ed82",
+      "same_as_imported": false
+    }
+  ]
+}

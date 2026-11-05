@@ -1,0 +1,8 @@
+# Auto-detect text files and normalize line endings on commit
+* text=auto
+
+# POSIX shell scripts must strictly use LF line endings across all platforms
+*.sh text eol=lf
+
+# Canonical seed fixture checksums use LF bytes on every platform.
+*.jsonl text eol=lf

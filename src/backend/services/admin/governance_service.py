@@ -8,6 +8,7 @@ from src.backend.models.system import AuditLog, AppSetting
 from src.backend.core.audit import write_audit, redact_payload
 from src.backend.core.dependencies import get_effective_permissions
 from src.backend.core.exceptions import AppException
+from src.backend.core.session import revoke_user_sessions
 from src.backend.schemas.auth import UserSelf
 
 def admin_list_users(

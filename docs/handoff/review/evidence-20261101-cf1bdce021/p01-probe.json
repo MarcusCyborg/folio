@@ -1,0 +1,51 @@
+{
+  "repo": "F:\\dpl13.10\\WikiSearchEngine-p01",
+  "boot": [
+    {
+      "case": "production_valid",
+      "started": true,
+      "legacy_status": 503
+    },
+    {
+      "case": "production_insecure_cookie",
+      "started": false,
+      "error_type": "ValueError"
+    },
+    {
+      "case": "production_weak_secret",
+      "started": false,
+      "error_type": "ValueError"
+    },
+    {
+      "case": "production_wildcard_origin",
+      "started": false,
+      "error_type": "ValueError"
+    },
+    {
+      "case": "invalid_environment",
+      "started": false,
+      "error_type": "ValueError"
+    }
+  ],
+  "health_database_unavailable": {
+    "status": 503,
+    "internal_error_exposed": false
+  },
+  "health_fault_injection": {
+    "status": 503,
+    "internal_error_exposed": false
+  },
+  "bootstrap": {
+    "first_create": "super_admin",
+    "password_hash_verified": true,
+    "duplicate_rejected": true,
+    "rotation_preserves_id": true,
+    "old_session_revoked": true,
+    "mismatched_email_rotation": {
+      "targeted_existing_member": true,
+      "role_after": "super_admin",
+      "email_matches_requested": false
+    },
+    "password_in_output": false
+  }
+}

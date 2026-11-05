@@ -1,0 +1,41 @@
+{
+  "repo": "F:\\dpl13.10\\WikiSearchEngine-github",
+  "boot": [
+    {
+      "case": "production_valid",
+      "started": true,
+      "legacy_status": 503
+    },
+    {
+      "case": "production_insecure_cookie",
+      "started": true,
+      "legacy_status": 503
+    },
+    {
+      "case": "production_weak_secret",
+      "started": true,
+      "legacy_status": 503
+    },
+    {
+      "case": "production_wildcard_origin",
+      "started": true,
+      "legacy_status": 503
+    },
+    {
+      "case": "invalid_environment",
+      "started": true,
+      "legacy_status": 503
+    }
+  ],
+  "health_database_unavailable": {
+    "status": 503,
+    "internal_error_exposed": false
+  },
+  "health_fault_injection": {
+    "status": 503,
+    "internal_error_exposed": true
+  },
+  "bootstrap": {
+    "available": false
+  }
+}

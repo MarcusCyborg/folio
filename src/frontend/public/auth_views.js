@@ -24,14 +24,14 @@ export async function renderLogin(container, routeContext) {
         <form id="loginForm" class="auth-form" novalidate>
           <div class="field">
             <label class="label" for="loginEmail">Email Address</label>
-            <input class="input" type="email" id="loginEmail" placeholder="reader@folio.test" required autocomplete="email" />
-            <span class="field-error-text" id="loginEmailError" style="display: none;"></span>
+            <input class="input" type="email" id="loginEmail" placeholder="reader@folio.test" required autocomplete="email" aria-describedby="loginEmailError" />
+            <span class="field-error-text" id="loginEmailError" style="display: none;" role="alert"></span>
           </div>
 
           <div class="field">
             <label class="label" for="loginPassword">Password</label>
-            <input class="input" type="password" id="loginPassword" placeholder="••••••••" required autocomplete="current-password" />
-            <span class="field-error-text" id="loginPasswordError" style="display: none;"></span>
+            <input class="input" type="password" id="loginPassword" placeholder="••••••••" required autocomplete="current-password" aria-describedby="loginPasswordError" />
+            <span class="field-error-text" id="loginPasswordError" style="display: none;" role="alert"></span>
           </div>
 
           <div id="loginError" class="notice notice-error" style="display: none; margin-bottom: 1.25rem;"></div>
@@ -165,28 +165,28 @@ export async function renderRegister(container, routeContext) {
         <form id="registerForm" class="auth-form" novalidate>
           <div class="field">
             <label class="label" for="regEmail">Email Address</label>
-            <input class="input" type="email" id="regEmail" placeholder="your.name@institution.edu" required autocomplete="email" />
-            <span class="field-error-text" id="regEmailError" style="display: none;"></span>
+            <input class="input" type="email" id="regEmail" placeholder="your.name@institution.edu" required autocomplete="email" aria-describedby="regEmailError" />
+            <span class="field-error-text" id="regEmailError" style="display: none;" role="alert"></span>
           </div>
 
           <div class="field">
             <label class="label" for="regUsername">Username</label>
-            <input class="input" type="text" id="regUsername" placeholder="researcher_handle" required autocomplete="username" />
+            <input class="input" type="text" id="regUsername" placeholder="researcher_handle" required autocomplete="username" aria-describedby="regUsernameError" />
             <span style="font-size: 0.75rem; color: var(--color-muted);">3–30 lowercase letters, numbers, or underscores</span>
-            <span class="field-error-text" id="regUsernameError" style="display: none;"></span>
+            <span class="field-error-text" id="regUsernameError" style="display: none;" role="alert"></span>
           </div>
 
           <div class="field">
             <label class="label" for="regDisplayName">Full Display Name</label>
-            <input class="input" type="text" id="regDisplayName" placeholder="Dr. Jane Doe" required autocomplete="name" />
-            <span class="field-error-text" id="regDisplayNameError" style="display: none;"></span>
+            <input class="input" type="text" id="regDisplayName" placeholder="Dr. Jane Doe" required autocomplete="name" aria-describedby="regDisplayNameError" />
+            <span class="field-error-text" id="regDisplayNameError" style="display: none;" role="alert"></span>
           </div>
 
           <div class="field">
             <label class="label" for="regPassword">Password</label>
-            <input class="input" type="password" id="regPassword" placeholder="••••••••••••" required autocomplete="new-password" />
+            <input class="input" type="password" id="regPassword" placeholder="••••••••••••" required autocomplete="new-password" aria-describedby="regPasswordError" />
             <span style="font-size: 0.75rem; color: var(--color-muted);">Minimum 10 characters</span>
-            <span class="field-error-text" id="regPasswordError" style="display: none;"></span>
+            <span class="field-error-text" id="regPasswordError" style="display: none;" role="alert"></span>
           </div>
 
           <div id="registerError" class="notice notice-error" style="display: none; margin-bottom: 1.25rem;"></div>

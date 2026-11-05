@@ -35,7 +35,7 @@ Folio is an enterprise document and research repository built to fulfill the **P
 
 ---
 
-## 3. Quickstart & Setup (PowerShell on Windows)
+## 3. Quickstart & Clean Setup (PowerShell on Windows)
 
 ### Prerequisites
 - Python 3.10 or higher.
@@ -48,21 +48,34 @@ git clone https://github.com/MarcusCyborg/folio.git
 cd folio
 ```
 
-### Step 2: Virtual Environment & Dependencies
+### Step 2: Clean Virtual Environment & Stratified Dependencies
+Folio uses strictly isolated virtual environments (`include-system-site-packages = false`) and stratified dependencies pinned and constrained against verified package versions (`constraints.txt`).
+
 ```powershell
-# Create virtual environment
-python -m venv env
+# Create clean isolated virtual environment
+python -m venv venv
 
 # Activate virtual environment
-.\env\Scripts\Activate.ps1
+.\venv\Scripts\Activate.ps1
 
-# Install core production & development dependencies
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
+# Upgrade pip and install core runtime & test dependencies with constraints
+python -m pip install --upgrade pip
+pip install -c constraints.txt -r requirements.txt -r requirements-dev.txt
 
-# Install Playwright browser binaries (for UI testing & visual verification)
+# (Optional) Install Playwright browser testing dependencies
+pip install -c constraints.txt -r requirements-browser.txt
 python -m playwright install chromium
+
+# (Optional) Decoupled legacy ML / crawl dependencies
+# pip install -r requirements-legacy.txt
 ```
+
+**Dependency Stratification:**
+- `requirements.txt`: Minimal core production runtime (FastAPI, Uvicorn, SQLAlchemy, Psycopg 3, Alembic, Argon2-cffi, Pydantic, Bleach, Markdown, python-dotenv).
+- `requirements-dev.txt`: Test harness and backend assertion libraries (Pytest, HTTPX).
+- `requirements-browser.txt`: Browser automation & E2E suite (Playwright).
+- `requirements-legacy.txt`: Decoupled legacy embeddings/ML dependencies (ChromaDB, Sentence-Transformers, PyTorch).
+- `constraints.txt`: Exact tested and verified package versions across environments.
 
 ### Step 3: Configure Environment Variables
 Copy `.env.example` to `.env`:
@@ -71,25 +84,25 @@ Copy-Item .env.example .env
 ```
 Ensure your PostgreSQL connection string in `.env` matches your local setup:
 ```env
-DATABASE_URL=postgresql+psycopg://postgres@127.0.0.1:5432/folio
-TEST_DATABASE_URL=postgresql+psycopg://postgres@127.0.0.1:5432/folio_test
+DATABASE_URL=postgresql+psycopg://postgres:postgres@127.0.0.1:5432/folio
+TEST_DATABASE_URL=postgresql+psycopg://postgres:postgres@127.0.0.1:5432/folio_test
 ENABLE_LEGACY_SEARCH=false
 ```
 
-### Step 4: Apply Database Migrations
+### Step 4: Apply Database Migrations & Seed Research Data
 Run Alembic to create or upgrade the database schema:
 ```powershell
 alembic upgrade head
 ```
 
-### Step 5: Seed Research Data
-Populate the database with the curated research fixture:
+Populate the database with the curated research fixture (fully idempotent):
 ```powershell
 python scripts/seed_folio.py
 ```
-*Output will confirm: `Seed complete. Database now contains: 5 users, 100 published documents, 3 drafts, 6 categories, 79 tags.`*
+*Output confirms: `Seed complete. Database now contains: 5 users, 100 published documents, 3 drafts, 6 categories, 123 tags.`*
+Running `python scripts/seed_folio.py` multiple times is safe and produces identical state without duplicates.
 
-### Step 6: Launch Development Server
+### Step 5: Launch Development Server
 ```powershell
 uvicorn src.backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
@@ -102,7 +115,7 @@ To run a clean presentation instance on the dedicated `folio_demo` database:
 # createdb -U postgres folio_demo
 
 # 2. Run migrations and seed clean dataset:
-$env:DATABASE_URL="postgresql+psycopg://postgres@127.0.0.1:5432/folio_demo"
+$env:DATABASE_URL="postgresql+psycopg://postgres:postgres@127.0.0.1:5432/folio_demo"
 alembic upgrade head
 python scripts/seed_folio.py
 
@@ -113,20 +126,65 @@ Navigate to: **`http://127.0.0.1:8002`**
 
 ---
 
-## 4. Automated Testing
+## 4. Automated Testing & Verification
 
-Run the full automated backend test suite (Foundation, Library API, Admin API, End-to-End integration, security sanitization, and click idempotency):
-```powershell
-pytest tests/backend -v
+### Test Database Isolation & Guard (Remediating IA-02)
+Tests do NOT touch or depend on manual seeds from your development database.
+- `src/backend/core/test_db_guard.py` strictly validates `TEST_DATABASE_URL`:
+  - Enforces that the target database name contains `test` and rejects protected database names (`postgres`, `folio`, `prod`, `master`, etc.).
+  - Evaluates effective driver connection arguments via `dialect.create_connect_args()` without opening network sockets.
+  - Strictly rejects target query parameter overrides (`?dbname=folio`, `host`, `port`, `service`, `options`, multi-host DSNs).
+  - Normalizes default port 5432 and loopback aliases (`localhost`, `127.0.0.1`, `127.0.0.2`, `::1`) against collision bypasses.
+  - Controls ambient libpq environment variables (`PGDATABASE`, `PGSERVICE`, `PGHOST`).
+  - Redacts credentials in all error messages—passwords are never leaked in tracebacks.
+- **Run Manifest & Selective Termination:**
+  - `TestRunManifest` assigns a unique run ID per test invocation (`run_<uuid>`) and strictly tracks owned databases.
+  - Pre-mutation connected identity check (`verify_connected_identity`) confirms database identity prior to executing any DDL.
+  - Selective backend termination (`selective_terminate_backends_sql`) only affects connections to the owned target database, never killing concurrent test runs.
+- **Savepoint & Browser State Isolation:**
+  - Backend tests wrap each test in a savepoint rollback (`create_savepoint`).
+  - Frontend browser tests utilize automatic database data state isolation (`isolate_frontend_test_database`), resetting mutated settings, demo user accounts, and test documents before and after each browser test, guaranteeing test execution order independence.
+
+### Unified Artifact Directory & Playwright Tracing (Remediating IA-07)
+All test outputs, visual verification screenshots, Playwright context failure traces, and JUnit reports are organized under a configurable, collision-free directory structure:
+```text
+test-results/artifacts/<worktree_or_checkout>/<commit_sha>/<run_id>/
+├── screenshots/
+│   ├── public/
+│   ├── admin/
+│   └── remediation/
+├── failures/
+│   ├── screenshots/
+│   └── traces/               # Playwright context trace archives (.zip)
+└── junit/
+    ├── junit-backend.xml
+    └── junit-frontend.xml
 ```
-All **58 automated backend tests** run against the dedicated test database (`folio_test`) and complete cleanly.
+- **Tracked Evidence Protection:** Tests and capture scripts never write to `../screenshots` or `docs/verification`. Historical baseline PNG files remain strictly untouched.
+- **Playwright Tracing:** Tracing (`context.tracing.start(screenshots=True, snapshots=True, sources=True)`) runs automatically on every browser context; on failure, full trace archives are stopped and saved before context closes.
+- **Environment Overrides:** Artifact root can be configured via `FOLIO_ARTIFACT_ROOT`, `FOLIO_SCREENSHOT_DIR`, or the `--output-dir` CLI flag.
 
-To run Playwright browser E2E and visual verification tests:
+### Running Backend Suite
 ```powershell
-pytest tests/frontend -v
+pytest tests/safety tests/security tests/backend -v --junitxml=test-results/junit-backend.xml
 ```
+Executes pure safety guards, security regression, rate limiter tests, and backend API suites. When PostgreSQL is available, provisions an isolated test database (`folio_test_<run_id>`); when PostgreSQL is unreachable, live database tests report `BLOCKED_ENV` without hanging.
 
-Run `python scripts/capture_screenshots.py` to capture public pages from the demo server on port 8002. Images are saved to `../screenshots/`, outside the repository.
+### Running Frontend Browser Suite (15 Tests)
+```powershell
+pytest tests/frontend -v --junitxml=test-results/junit-frontend.xml
+```
+Runs Playwright browser tests across viewports (`1280x720`, `1366x768`, `1440x900`, `1920x1080`, and laptop 125% zoom simulation). Screenshots and failure traces are saved to the isolated artifact directory.
+
+### Configurable Public Screenshot Capture
+The screenshot capture script (`scripts/capture_screenshots.py`) captures public views into the run-isolated artifact directory:
+```powershell
+# Default outputs to test-results/artifacts/<worktree>/<commit>/<run_id>/screenshots/public
+python scripts/capture_screenshots.py
+
+# Or specify custom target and output directory:
+python scripts/capture_screenshots.py --output-dir custom_screenshots/ --base-url http://127.0.0.1:8000
+```
 
 ---
 
@@ -148,6 +206,9 @@ All demo accounts are pre-seeded with the uniform password: `FolioDemo2026!`
 
 ```text
 folio/
+├── .github/
+│   └── workflows/
+│       └── ci.yml                   # GitHub Actions CI workflow (Postgres, venv, pytest, Playwright)
 ├── alembic/                         # Database schema migrations
 │   └── versions/
 │       └── efeaa3d84c9b_initial_folio_schema.py
@@ -160,9 +221,10 @@ folio/
 │       └── TEST-REPORT.md           # QA test report & desktop viewport evidence
 ├── fixtures/
 │   └── folio/
-│       ├── documents.jsonl          # 100 authentic research articles + 3 drafts
+│       ├── documents.jsonl          # Authentic research articles + drafts
 │       └── SOURCES.md               # Wikipedia citations & licensing notes
 ├── scripts/
+│   ├── capture_screenshots.py       # Configurable public screenshot capture script
 │   └── seed_folio.py                # Idempotent database seed script
 ├── src/
 │   ├── backend/
@@ -183,20 +245,40 @@ folio/
 │       ├── core/                    # API client, session/RBAC, router, UI helpers
 │       ├── public/                  # Library catalog, reading column, auth views
 │       └── admin/                   # Control panel, editor, moderation, analytics
-└── tests/
-    ├── backend/                     # Pytest automated backend test suites (51 tests)
-    │   ├── foundation/              # Auth, CSRF, sessions, startup, permissions
-    │   ├── library/                 # Search, detail, likes, comments, anti-spam
-    │   ├── admin/                   # Documents CRUD, taxonomy, RBAC, moderation, SEO, analytics
-    │   └── integration/             # Full multi-persona lifecycle test
-    └── frontend/                    # Playwright browser E2E & visual test suites (15 tests)
-        ├── admin/                   # Admin UI flows & multi-viewport screenshots
-        └── public/                  # Library catalog, reading column, mentions, auth
+├── tests/
+│   ├── conftest.py                  # Pytest fixtures, DB guard, live_server, Playwright
+│   ├── backend/                     # Pytest automated backend test suites (58 tests)
+│   │   ├── foundation/              # Auth, CSRF, sessions, startup, permissions
+│   │   ├── library/                 # Search, detail, likes, comments, anti-spam
+│   │   ├── admin/                   # Documents CRUD, taxonomy, RBAC, moderation, SEO, analytics
+│   │   └── integration/             # Full multi-persona lifecycle test
+│   └── frontend/                    # Playwright browser E2E & visual test suites (15 tests)
+│       ├── admin/                   # Admin UI flows & multi-viewport screenshots
+│       └── public/                  # Library catalog, reading column, mentions, auth
+├── constraints.txt                  # Pinned verified package versions
+├── requirements.txt                 # Core runtime dependencies
+├── requirements-dev.txt             # Testing and development dependencies
+├── requirements-browser.txt         # Playwright and browser test dependencies
+└── requirements-legacy.txt          # Optional decoupled ML/embedding dependencies
 ```
 
 ---
 
-## 7. Troubleshooting
+## 7. Continuous Integration (CI)
+
+Folio includes an automated GitHub Actions workflow (`.github/workflows/ci.yml`) triggered on every push and pull request to `main` and feature branches.
+
+The pipeline executes:
+1. **Service Container:** Spins up PostgreSQL 16 on port 5432 with health check.
+2. **Clean Installation:** Sets up Python 3.10 virtual environment and installs dependencies using `constraints.txt`.
+3. **Migration Verification:** Applies Alembic migrations (`alembic upgrade head`) from scratch.
+4. **Seed Idempotency Check:** Runs `python scripts/seed_folio.py` consecutively twice to verify strict zero-duplicate idempotency.
+5. **Backend Test Suite:** Executes all 58 backend tests, producing JUnit XML report.
+6. **Frontend Test Suite:** Installs Playwright Chromium browser binary and runs all 15 browser E2E tests, capturing failure traces/screenshots and uploading test artifacts.
+
+---
+
+## 8. Troubleshooting
 
 - **PostgreSQL Connection Error:** Ensure PostgreSQL is active on port 5432 and the `folio` database exists (`createdb -U postgres folio`).
 - **CSRF Token Rejected (403 Forbidden):** The frontend handles CSRF tokens automatically via `GET /api/v1/auth/session` and sends `X-CSRF-Token` headers. If testing via curl/Postman, fetch `/api/v1/auth/session` first to obtain a valid session cookie and CSRF token.
@@ -205,7 +287,7 @@ folio/
 
 ---
 
-## 8. Optional Legacy ML Search Note
+## 9. Optional Legacy ML Search Note
 
 The repository preserves legacy search and crawling code developed during earlier milestones (located in `search_service.py`, `wiki_bot/`, and `utils/`). This legacy subsystem is **completely decoupled** and guarded by the `ENABLE_LEGACY_SEARCH` environment variable (defaults to `false`).
 

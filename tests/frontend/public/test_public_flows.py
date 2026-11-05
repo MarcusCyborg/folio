@@ -11,40 +11,21 @@ from playwright.sync_api import sync_playwright
 
 from src.backend.main import app
 
-SCREENSHOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../docs/verification/public"))
-os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+from src.backend.core.artifact_utils import get_artifact_context
+
+def get_public_screenshot_dir() -> str:
+    return str(get_artifact_context().get_screenshots_dir('public'))
+
+SCREENSHOT_DIR = get_public_screenshot_dir()
 
 PORT = 8888
 BASE_URL = f"http://127.0.0.1:{PORT}"
 
 
 @pytest.fixture(scope="session", autouse=True)
-def run_app_server():
-    """Starts local FastAPI test server on dedicated port 8888."""
-    config = uvicorn.Config(app, host="127.0.0.1", port=PORT, log_level="error")
-    server = uvicorn.Server(config)
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    time.sleep(1.2)
-    yield
-    server.should_exit = True
-
-
-@pytest.fixture(scope="session")
-def browser_instance():
-    """Launches Chromium browser using available system channel."""
-    with sync_playwright() as p:
-        browser = None
-        for channel in ["chrome", "msedge"]:
-            try:
-                browser = p.chromium.launch(channel=channel, headless=True)
-                break
-            except Exception:
-                continue
-        if browser is None:
-            browser = p.chromium.launch(headless=True)
-        yield browser
-        browser.close()
+def configure_server(live_server):
+    global BASE_URL
+    BASE_URL = live_server
 
 
 def test_library_catalog_and_viewports(browser_instance):
@@ -99,7 +80,7 @@ def test_library_filtering_search_and_pagination(browser_instance):
     page.locator("#librarySearchBtn").click()
 
     page.wait_for_url("**/#/library?q=learning")
-    page.wait_for_selector(".document-card-row")
+    page.wait_for_selector(".active-filter-chip", timeout=5000)
 
     # Verify active filters bar displays query chip
     chip = page.locator(".active-filter-chip")
@@ -119,13 +100,14 @@ def test_library_filtering_search_and_pagination(browser_instance):
 
     # 3. Clear query chip
     page.locator(".active-filter-chip button.chip-remove-btn").first.click()
+    page.wait_for_load_state("networkidle")
     page.wait_for_selector(".document-card-row")
 
     # 4. Empty search results
     search_input = page.locator("#librarySearchInput")
     search_input.fill("xyznonexistentterm9999")
     page.locator("#librarySearchBtn").click()
-
+    page.wait_for_load_state("networkidle")
     page.wait_for_selector(".empty-state")
     page.screenshot(path=os.path.join(SCREENSHOT_DIR, "library_empty_state.png"))
 
@@ -239,6 +221,7 @@ def test_document_detail_reading_like_and_discussions(browser_instance):
     # Search to obtain search_event_id
     page.locator("#librarySearchInput").fill("Deep learning")
     page.locator("#librarySearchBtn").click()
+    page.wait_for_selector(".active-filter-chip", timeout=5000)
     page.wait_for_selector(".document-card-row")
 
     # Click first document link (passes search_event_id)

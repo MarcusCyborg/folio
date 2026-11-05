@@ -12,6 +12,10 @@ from src.backend.core.exceptions import AppException
 from src.backend.core.sanitizer import render_and_sanitize_markdown
 from src.backend.schemas.library import Taxon
 from src.backend.schemas.admin import DocumentWrite, CategoryWrite, TagWrite, CategoryUpdate, TagUpdate
+from src.backend.search_index.outbox import (
+    record_revision_and_outbox_job,
+    emit_taxonomy_reindex_jobs,
+)
 
 def slugify(text: str) -> str:
     if not text:
@@ -144,6 +148,8 @@ def admin_create_document(db: Session, data: DocumentWrite, user: User) -> dict:
         valid_tags = db.query(Tag).filter(Tag.id.in_(data.tag_ids)).all()
         for vt in valid_tags:
             db.add(DocumentTag(document_id=doc.id, tag_id=vt.id))
+        db.flush()
+    db.expire(doc, ["document_tags", "category"])
 
     write_audit(
         db,
@@ -153,8 +159,10 @@ def admin_create_document(db: Session, data: DocumentWrite, user: User) -> dict:
         entity_id=doc.id,
         after={"title": doc.title, "status": doc.status}
     )
+    record_revision_and_outbox_job(db, doc)
     db.commit()
     db.refresh(doc)
+    db.expire(doc, ["document_tags", "category"])
     return admin_get_document(db, doc.id)
 
 def admin_update_document(db: Session, doc_id: str, data: dict, user: User) -> dict:
@@ -198,12 +206,17 @@ def admin_update_document(db: Session, doc_id: str, data: dict, user: User) -> d
         doc.source_attribution = data["source_attribution"]
 
     if "tag_ids" in data and data["tag_ids"] is not None:
-        db.query(DocumentTag).filter(DocumentTag.document_id == doc.id).delete()
-        valid_tags = db.query(Tag).filter(Tag.id.in_(data["tag_ids"])).all()
-        for vt in valid_tags:
-            db.add(DocumentTag(document_id=doc.id, tag_id=vt.id))
+        db.query(DocumentTag).filter(DocumentTag.document_id == doc.id).delete(synchronize_session=False)
+        if data["tag_ids"]:
+            valid_tags = db.query(Tag).filter(Tag.id.in_(data["tag_ids"])).all()
+            for vt in valid_tags:
+                db.add(DocumentTag(document_id=doc.id, tag_id=vt.id))
+        db.flush()
+        db.expire(doc, ["document_tags"])
 
     doc.updated_at = datetime.now(timezone.utc)
+    db.flush()
+    db.expire(doc, ["document_tags", "category"])
     write_audit(
         db,
         actor=user,
@@ -213,7 +226,9 @@ def admin_update_document(db: Session, doc_id: str, data: dict, user: User) -> d
         before=before_state,
         after={"title": doc.title, "summary": doc.summary}
     )
+    record_revision_and_outbox_job(db, doc)
     db.commit()
+    db.expire(doc, ["document_tags", "category"])
     return admin_get_document(db, doc.id)
 
 def admin_update_document_status(db: Session, doc_id: str, new_status: str, user: User) -> dict:
@@ -240,6 +255,7 @@ def admin_update_document_status(db: Session, doc_id: str, new_status: str, user
     before_status = doc.status
     doc.status = new_status
     doc.updated_at = datetime.now(timezone.utc)
+    db.flush()
 
     write_audit(
         db,
@@ -250,7 +266,10 @@ def admin_update_document_status(db: Session, doc_id: str, new_status: str, user
         before={"status": before_status},
         after={"status": doc.status}
     )
+    op = "upsert" if doc.status == "published" else "delete"
+    record_revision_and_outbox_job(db, doc, operation=op)
     db.commit()
+    db.expire(doc, ["document_tags", "category"])
     return admin_get_document(db, doc.id)
 
 def admin_delete_document(db: Session, doc_id: str, user: User):
@@ -259,6 +278,7 @@ def admin_delete_document(db: Session, doc_id: str, user: User):
         raise AppException(status_code=404, code="DOCUMENT_NOT_FOUND", message="Document not found")
 
     doc.deleted_at = datetime.now(timezone.utc)
+    db.flush()
     write_audit(
         db,
         actor=user,
@@ -267,6 +287,7 @@ def admin_delete_document(db: Session, doc_id: str, user: User):
         entity_id=doc.id,
         before={"status": doc.status}
     )
+    record_revision_and_outbox_job(db, doc, operation="delete")
     db.commit()
 
 # --- Taxonomy CRUD ---
@@ -344,6 +365,7 @@ def admin_update_category(db: Session, cat_id: str, data: CategoryUpdate, user: 
                 raise AppException(status_code=409, code="SLUG_EXISTS", message="Category with this slug already exists")
             cat.slug = slug_clean
 
+    db.flush()
     write_audit(
         db,
         actor=user,
@@ -353,6 +375,20 @@ def admin_update_category(db: Session, cat_id: str, data: CategoryUpdate, user: 
         before=before_state,
         after={"name": cat.name, "slug": cat.slug, "description": cat.description}
     )
+    if before_state["name"] != cat.name or before_state["slug"] != cat.slug:
+        affected_doc_ids = [
+            row[0]
+            for row in db.query(Document.id)
+            .filter(
+                Document.category_id == cat.id,
+                Document.status == "published",
+                Document.deleted_at.is_(None),
+            )
+            .all()
+        ]
+        if affected_doc_ids:
+            emit_taxonomy_reindex_jobs(db, affected_doc_ids)
+
     db.commit()
     return {"id": cat.id, "name": cat.name, "slug": cat.slug, "description": cat.description}
 
@@ -436,6 +472,7 @@ def admin_update_tag(db: Session, tag_id: str, data: TagUpdate, user: User) -> d
                 raise AppException(status_code=409, code="SLUG_EXISTS", message="Tag with this slug already exists")
             tag.slug = slug_clean
 
+    db.flush()
     write_audit(
         db,
         actor=user,
@@ -445,6 +482,21 @@ def admin_update_tag(db: Session, tag_id: str, data: TagUpdate, user: User) -> d
         before=before_state,
         after={"name": tag.name, "slug": tag.slug}
     )
+    if before_state["name"] != tag.name or before_state["slug"] != tag.slug:
+        affected_doc_ids = [
+            row[0]
+            for row in db.query(DocumentTag.document_id)
+            .join(Document, Document.id == DocumentTag.document_id)
+            .filter(
+                DocumentTag.tag_id == tag.id,
+                Document.status == "published",
+                Document.deleted_at.is_(None),
+            )
+            .all()
+        ]
+        if affected_doc_ids:
+            emit_taxonomy_reindex_jobs(db, affected_doc_ids)
+
     db.commit()
     return {"id": tag.id, "name": tag.name, "slug": tag.slug}
 

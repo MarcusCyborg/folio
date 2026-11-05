@@ -38,6 +38,11 @@
   box-sizing: border-box;
 }
 
+html, body {
+  overflow-x: hidden;
+  width: 100%;
+}
+
 body {
   margin: 0;
   padding: 0;
@@ -47,6 +52,20 @@ body {
   font-size: 15px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Visually Hidden Utility for Accessible Screen Readers */
+.visually-hidden,
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
 }
 
 /* ==========================================================================
@@ -70,6 +89,40 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+@media (max-width: 768px) {
+  .shell-header-inner {
+    padding: 0 1rem;
+  }
+  .shell-tagline {
+    display: none !important;
+  }
+  .shell-nav {
+    gap: 0.75rem !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .shell-header {
+    height: auto;
+    min-height: var(--header-height);
+    padding: 0.35rem 0;
+  }
+  .shell-header-inner {
+    padding: 0 0.75rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .shell-logo-wordmark {
+    font-size: 1.3rem !important;
+  }
+  .user-badge {
+    font-size: 0.8rem !important;
+  }
+  .user-badge .role-chip {
+    display: none;
+  }
 }
 
 .shell-brand {

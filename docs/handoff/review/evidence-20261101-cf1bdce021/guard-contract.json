@@ -1,0 +1,37 @@
+{
+  "guard": [
+    {
+      "case": "same_literal_target",
+      "accepted": false
+    },
+    {
+      "case": "same_target_implicit_default_port",
+      "accepted": true
+    },
+    {
+      "case": "same_target_host_alias",
+      "accepted": true
+    },
+    {
+      "case": "postgresql_query_target_override",
+      "accepted": true,
+      "actual_driver_dbname": "folio"
+    },
+    {
+      "case": "protected_main_name",
+      "accepted": false
+    }
+  ],
+  "fixture": {
+    "rows": 103,
+    "status_counts": {
+      "published": 100,
+      "draft": 3
+    },
+    "id_versions": {
+      "5": 103
+    },
+    "unique_ids": 103,
+    "unique_source_urls": 103
+  }
+}

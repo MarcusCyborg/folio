@@ -40,7 +40,10 @@ def get_session_by_token(db: Session, raw_token: str) -> Optional[SessionModel]:
     session_obj = db.query(SessionModel).filter(SessionModel.token_hash == token_hash).first()
     if not session_obj:
         return None
-    if session_obj.expires_at <= datetime.now(timezone.utc):
+    expires_at = session_obj.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= datetime.now(timezone.utc):
         db.delete(session_obj)
         db.flush()
         return None
@@ -68,23 +71,24 @@ def revoke_user_sessions(db: Session, user_id: str, except_session_id: Optional[
     return count
 
 def set_session_cookie(response: Response, raw_token: str):
-    """Sets the HttpOnly session cookie on the response."""
+    """Sets the HttpOnly session cookie on the response with security flags."""
     max_age = settings.SESSION_MAX_AGE_DAYS * 86400
     response.set_cookie(
         key=settings.SESSION_COOKIE_NAME,
         value=raw_token,
         max_age=max_age,
         httponly=True,
-        samesite="lax",
+        samesite=settings.COOKIE_SAMESITE,
         path="/",
         secure=settings.COOKIE_SECURE,
     )
 
 def clear_session_cookie(response: Response):
-    """Clears the session cookie."""
+    """Clears the session cookie matching security flags."""
     response.delete_cookie(
         key=settings.SESSION_COOKIE_NAME,
         path="/",
         httponly=True,
-        samesite="lax",
+        samesite=settings.COOKIE_SAMESITE,
+        secure=settings.COOKIE_SECURE,
     )

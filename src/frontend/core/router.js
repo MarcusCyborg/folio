@@ -10,6 +10,7 @@ let notFoundHandler = null;
 let currentLeaveGuard = null;
 let lastActiveHash = (typeof window !== 'undefined' && window.location.hash) ? window.location.hash : '#/library';
 let isRevertingHash = false;
+let isCheckingLeaveGuard = false;
 
 export function registerLeaveGuard(guardFn) {
   currentLeaveGuard = guardFn;
@@ -25,9 +26,15 @@ export async function navigate(path) {
   if (window.location.hash === targetHash) return;
 
   if (currentLeaveGuard) {
-    const canLeave = await currentLeaveGuard();
-    if (!canLeave) return;
-    currentLeaveGuard = null;
+    if (isCheckingLeaveGuard) return;
+    isCheckingLeaveGuard = true;
+    try {
+      const canLeave = await currentLeaveGuard();
+      if (!canLeave) return;
+      currentLeaveGuard = null;
+    } finally {
+      isCheckingLeaveGuard = false;
+    }
   }
   window.location.hash = targetHash;
 }
@@ -85,13 +92,19 @@ async function handleRouteChange() {
 
   const currentRawHash = window.location.hash || '#/library';
   if (currentLeaveGuard && currentRawHash !== lastActiveHash) {
-    const canLeave = await currentLeaveGuard();
-    if (!canLeave) {
-      isRevertingHash = true;
-      window.location.hash = lastActiveHash;
-      return;
+    if (isCheckingLeaveGuard) return;
+    isCheckingLeaveGuard = true;
+    try {
+      const canLeave = await currentLeaveGuard();
+      if (!canLeave) {
+        isRevertingHash = true;
+        window.location.hash = lastActiveHash;
+        return;
+      }
+      currentLeaveGuard = null;
+    } finally {
+      isCheckingLeaveGuard = false;
     }
-    currentLeaveGuard = null;
   }
 
   lastActiveHash = currentRawHash;

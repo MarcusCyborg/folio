@@ -9,6 +9,7 @@ from src.backend.models.auth import User
 from src.backend.core.audit import write_audit
 from src.backend.core.exceptions import AppException
 from src.backend.schemas.admin import SEOMetadataUpdate
+from src.backend.search_index.outbox import record_revision_and_outbox_job
 
 def admin_update_document_seo(
     db: Session,
@@ -50,6 +51,8 @@ def admin_update_document_seo(
             "cover_image_alt": doc.cover_image_alt,
         }
     )
+    if doc.status == "published" and doc.deleted_at is None:
+        record_revision_and_outbox_job(db, doc, operation="upsert")
     db.commit()
 
     return {
