@@ -41,6 +41,9 @@ class WikipediaSpider(scrapy.Spider):
         if content_html:
             soup = BeautifulSoup(content_html, 'html.parser')
 
+            for edit_control in soup.select('.mw-editsection'):
+                edit_control.decompose()
+
             for ref in soup.find_all('sup', class_='reference'):
                 ref.decompose()
 

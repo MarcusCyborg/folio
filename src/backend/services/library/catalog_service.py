@@ -10,6 +10,7 @@ from src.backend.models.comment import Comment
 from src.backend.models.system import AppSetting
 from src.backend.models.event import InteractionLog
 from src.backend.core.sanitizer import render_and_sanitize_markdown
+from src.backend.core.wiki_content import clean_wikipedia_content
 from src.backend.core.exceptions import AppException
 from src.backend.schemas.library import DocumentSummary, DocumentDetail, Taxon
 
@@ -219,7 +220,8 @@ def get_published_document_detail(db: Session, doc_id: str, user_id: Optional[st
             DocumentLike.user_id == user_id
         ).first() is not None
 
-    rendered_html = render_and_sanitize_markdown(doc.content)
+    content = clean_wikipedia_content(doc.content, doc.source_url)
+    rendered_html = render_and_sanitize_markdown(content)
 
     tags_list = [
         Taxon(id=dt.tag.id, name=dt.tag.name, slug=dt.tag.slug)
@@ -230,7 +232,7 @@ def get_published_document_detail(db: Session, doc_id: str, user_id: Optional[st
         "id": doc.id,
         "title": doc.title,
         "summary": doc.summary,
-        "content": doc.content,
+        "content": content,
         "rendered_content": rendered_html,
         "author": doc.author,
         "created_at": doc.created_at,

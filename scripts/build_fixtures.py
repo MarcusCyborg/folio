@@ -2,6 +2,12 @@ import json
 import os
 import re
 import uuid
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from src.backend.core.wiki_content import clean_wikipedia_content
 
 RAW_DATA_PATH = "data/raw/wiki_crawler_dataset.jsonl"
 OUTPUT_DIR = "fixtures/folio"
@@ -136,6 +142,7 @@ def build():
             title = data.get("title", "").strip()
             text = data.get("text", "").strip()
             url = data.get("url", "").strip()
+            text = clean_wikipedia_content(text, url)
 
             if not title or not text or not url:
                 continue
