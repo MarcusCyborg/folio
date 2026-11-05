@@ -18,8 +18,6 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgrespassword
           POSTGRES_DB: folio
-        ports:
-          - 5432:5432
         options: >-
           --health-cmd pg_isready
           --health-interval 5s
@@ -48,9 +46,16 @@ jobs:
           pip install -r requirements.txt -r requirements-dev.txt -c constraints.txt
           pip check
 
-      - name: Verify migration on clean database
+      - name: Configure and verify direct PostgreSQL endpoint
         env:
-          DATABASE_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/folio
+          POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+        run: |
+          source venv/bin/activate
+          python scripts/configure_ci_database.py
+
+      - name: Verify migration on clean database
         run: |
           source venv/bin/activate
           alembic upgrade head
@@ -58,8 +63,6 @@ jobs:
       - name: Verify database seeding idempotency (seed 2 times with assertions)
         env:
           APP_ENV: test
-          DATABASE_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/folio
-          FOLIO_TEST_ADMIN_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/postgres
         run: |
           source venv/bin/activate
           python scripts/verify_seed_idempotency.py
@@ -68,9 +71,6 @@ jobs:
         env:
           APP_ENV: test
           APP_SECRET: test_secret_key_32bytes_minimum_for_tests_12345
-          DATABASE_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/folio
-          TEST_DATABASE_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/folio_test
-          FOLIO_TEST_ADMIN_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/postgres
         run: |
           source venv/bin/activate
           pytest tests/safety tests/security tests/backend --ignore=tests/safety/test_artifact_isolation.py -v --junitxml=test-results/junit-backend.xml
@@ -94,8 +94,6 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgrespassword
           POSTGRES_DB: folio
-        ports:
-          - 5432:5432
         options: >-
           --health-cmd pg_isready
           --health-interval 5s
@@ -124,6 +122,15 @@ jobs:
           pip install -r requirements-browser.txt -c constraints.txt
           pip check
 
+      - name: Configure and verify direct PostgreSQL endpoint
+        env:
+          POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+        run: |
+          source venv/bin/activate
+          python scripts/configure_ci_database.py
+
       - name: Install Playwright Chromium with dependencies
         run: |
           source venv/bin/activate
@@ -133,9 +140,6 @@ jobs:
         env:
           APP_ENV: test
           APP_SECRET: test_secret_key_32bytes_minimum_for_tests_12345
-          DATABASE_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/folio
-          TEST_DATABASE_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/folio_test
-          FOLIO_TEST_ADMIN_URL: postgresql+psycopg://postgres:postgrespassword@127.0.0.1:5432/postgres
         run: |
           source venv/bin/activate
           pytest --noconftest tests/safety/test_artifact_isolation.py -v --junitxml=test-results/junit-artifact.xml
