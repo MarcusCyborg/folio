@@ -1,5 +1,5 @@
 # tests/frontend/public/test_p07_evidence.py
-# Automated P07 Visual Evidence Capture across Viewports, Search States & Admin Remediations
+# Automated P07 Visual Evidence Capture across Viewports, Search States & Admin Remediations (including IB-R06)
 
 import os
 import time
@@ -7,7 +7,11 @@ import pytest
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
+from tests.conftest import TestingSessionLocal
 from src.backend.core.artifact_utils import get_artifact_context, get_git_commit_sha
+from src.backend.models.search_index import IndexGeneration
+from src.backend.services.search.search_service import search_engine
+
 
 def login_admin(page, live_server, email="admin@folio.test", password="FolioDemo2026!"):
     page.goto(f"{live_server}/#/login")
@@ -18,7 +22,7 @@ def login_admin(page, live_server, email="admin@folio.test", password="FolioDemo
     page.wait_for_selector(".user-badge, #logoutBtn", timeout=5000)
 
 
-def test_capture_p07_complete_evidence(live_server, browser_instance):
+def test_capture_p07_complete_evidence(live_server, browser_instance, active_lexical_index):
     """
     Captures complete P07 visual evidence into the collision-free artifact directory
     managed by artifact_utils, preserving all existing screenshots and baseline assets.
@@ -29,13 +33,25 @@ def test_capture_p07_complete_evidence(live_server, browser_instance):
 
     print(f"\n[P07 Evidence] Capturing visual evidence to: {evidence_dir} (commit: {commit_sha})")
 
-    # 1. Search BM25 Results Desktop (1440x900)
+    # 1. Search BM25 Results Desktop (1440x900) — must be healthy BM25, not ILIKE_FALLBACK
     ctx_1440 = browser_instance.new_context(viewport={"width": 1440, "height": 900})
     page = ctx_1440.new_page()
+
+    bm25_payloads = []
+    page.on(
+        "response",
+        lambda r: bm25_payloads.append(r.json())
+        if ("/api/v1/search" in r.url and "mode=bm25" in r.url and r.status == 200)
+        else None,
+    )
 
     page.goto(f"{live_server}/#/library?q=learning&mode=bm25")
     page.wait_for_selector(".document-card-row", timeout=10000)
     page.wait_for_timeout(600)
+    assert bm25_payloads and bm25_payloads[-1]["engine_used"] == "bm25"
+    assert bm25_payloads[-1]["is_degraded"] is False
+    assert page.locator(".degraded-engine-banner").count() == 0
+
     shot_1 = evidence_dir / "01_search_bm25_desktop_1440.png"
     page.screenshot(path=str(shot_1))
     assert shot_1.exists()
@@ -164,3 +180,69 @@ def test_capture_p07_complete_evidence(live_server, browser_instance):
 
     ctx_1440.close()
     print(f"[P07 Evidence] Successfully captured all 11 evidence screenshots in {evidence_dir}!")
+
+
+def test_ib_r06_healthy_bm25_and_deliberate_fallback_evidence(
+    live_server, browser_instance, active_lexical_index
+):
+    """
+    IB-R06: Captures dedicated screenshots in a separate subdirectory ('p07_evidence_ib_r06')
+    proving:
+    1) Healthy BM25 path returns engine_used='bm25', is_degraded=False, displays BM25 badge,
+       and has NO degraded banner.
+    2) Deliberate missing-index fallback path returns engine_used='ilike_fallback', is_degraded=True,
+       and displays the degraded banner.
+    """
+    ib_dir = get_artifact_context().get_screenshots_dir("p07_evidence_ib_r06")
+    ib_dir.mkdir(parents=True, exist_ok=True)
+
+    ctx = browser_instance.new_context(viewport={"width": 1440, "height": 900})
+    page = ctx.new_page()
+
+    payloads = []
+    page.on(
+        "response",
+        lambda r: payloads.append(r.json())
+        if ("/api/v1/search" in r.url and r.status == 200)
+        else None,
+    )
+
+    # 1. Healthy BM25 path
+    page.goto(f"{live_server}/#/library?q=learning&mode=bm25")
+    page.wait_for_selector(".document-card-row", timeout=10000)
+    page.wait_for_timeout(500)
+
+    assert payloads and payloads[-1]["engine_used"] == "bm25"
+    assert payloads[-1]["is_degraded"] is False
+    assert page.locator(".degraded-engine-banner").count() == 0
+    assert page.locator(".telemetry-badge.badge-degraded").count() == 0
+    assert "BM25" in page.locator(".search-telemetry-bar").text_content()
+
+    healthy_shot = ib_dir / "01_healthy_bm25_desktop_1440.png"
+    page.screenshot(path=str(healthy_shot))
+    assert healthy_shot.exists()
+
+    # 2. Deliberate fallback path (disable active lexical index generation in DB)
+    db = TestingSessionLocal()
+    try:
+        for gen in db.query(IndexGeneration).all():
+            gen.status = "failed"
+        db.commit()
+    finally:
+        db.close()
+    search_engine.clear_cache()
+
+    page.goto(f"{live_server}/#/library?q=neural&mode=bm25")
+    page.wait_for_selector(".degraded-engine-banner", timeout=10000)
+    page.wait_for_timeout(500)
+
+    assert payloads[-1]["engine_used"] == "ilike_fallback"
+    assert payloads[-1]["is_degraded"] is True
+    assert page.locator(".degraded-engine-banner").is_visible()
+    assert "ILIKE_FALLBACK" in page.locator(".telemetry-badge.badge-degraded").text_content()
+
+    fallback_shot = ib_dir / "02_deliberate_ilike_fallback_banner_1440.png"
+    page.screenshot(path=str(fallback_shot))
+    assert fallback_shot.exists()
+
+    ctx.close()

@@ -112,6 +112,9 @@ class SearchContext(Base):
     actor_key: Mapped[str] = mapped_column(String(64), nullable=False)
     query: Mapped[str] = mapped_column(String(200), nullable=False)
     mode: Mapped[str] = mapped_column(String(20), default="bm25", nullable=False)
+    engine_used: Mapped[str] = mapped_column(String(30), default="bm25", nullable=False)
+    is_degraded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    degraded_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     filters_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     page_size: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
     index_generation_id: Mapped[str] = mapped_column(

@@ -2,13 +2,13 @@ import time
 import uuid
 import re
 from datetime import datetime, timezone, date, timedelta
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Set
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from src.backend.core.config import settings
 from src.backend.core.exceptions import AppException
-from src.backend.models.document import Document
+from src.backend.models.document import Document, DocumentTag
 from src.backend.models.taxonomy import Category, Tag
 from src.backend.models.event import InteractionLog
 from src.backend.models.search_index import IndexGeneration
@@ -58,6 +58,95 @@ class SearchService:
     ):
         self.engine = engine or search_engine
         self.adapter = adapter or semantic_adapter
+
+    def _filter_semantic_candidates(
+        self,
+        db: Session,
+        sem_hits: List[SemanticCandidateHit],
+        category_id: Optional[str] = None,
+        tag_ids: Optional[List[str]] = None,
+        date_from_utc: Optional[datetime] = None,
+        date_to_utc: Optional[datetime] = None,
+    ) -> List[SemanticCandidateHit]:
+        """
+        Applies exact BM25-equivalent filtering to dense vector candidates BEFORE
+        RRF fusion, candidate snapshot creation, or count evaluation:
+        - status == 'published'
+        - deleted_at IS NULL
+        - category_id exact match
+        - tag_ids strict AND semantics
+        - date_from_utc / date_to_utc inclusive UTC bounds on Document.created_at
+        - Deterministic tie-breaking: score DESC, doc_id ASC with contiguous 1-based ranks.
+        """
+        if not sem_hits:
+            return []
+
+        cand_doc_ids = list({h.doc_id for h in sem_hits})
+        q = db.query(Document).filter(
+            Document.id.in_(cand_doc_ids),
+            Document.status == "published",
+            Document.deleted_at.is_(None),
+        )
+
+        if category_id is not None:
+            q = q.filter(Document.category_id == category_id)
+
+        if tag_ids:
+            for t_id in tag_ids:
+                q = q.filter(Document.document_tags.any(tag_id=t_id))
+
+        if date_from_utc is not None:
+            q = q.filter(Document.created_at >= date_from_utc)
+
+        if date_to_utc is not None:
+            q = q.filter(Document.created_at <= date_to_utc)
+
+        matching_docs = q.all()
+        valid_ids: Set[str] = set()
+        required_tags = set(tag_ids) if tag_ids else set()
+
+        for doc in matching_docs:
+            if category_id is not None and doc.category_id != category_id:
+                continue
+            if required_tags:
+                doc_tag_ids = {
+                    row[0]
+                    for row in db.query(DocumentTag.tag_id)
+                    .filter(DocumentTag.document_id == doc.id)
+                    .all()
+                }
+                if not required_tags.issubset(doc_tag_ids):
+                    continue
+            if date_from_utc is not None or date_to_utc is not None:
+                if not doc.created_at:
+                    continue
+                doc_dt = doc.created_at
+                if doc_dt.tzinfo is None:
+                    doc_dt = doc_dt.replace(tzinfo=timezone.utc)
+                else:
+                    doc_dt = doc_dt.astimezone(timezone.utc)
+                if date_from_utc is not None and doc_dt < date_from_utc:
+                    continue
+                if date_to_utc is not None and doc_dt > date_to_utc:
+                    continue
+            valid_ids.add(doc.id)
+
+        filtered = [h for h in sem_hits if h.doc_id in valid_ids]
+        # Deterministic tie-breaking: score DESC, doc_id ASC
+        filtered.sort(key=lambda h: (-h.score, h.doc_id))
+
+        ranked: List[SemanticCandidateHit] = []
+        for rank_idx, hit in enumerate(filtered, start=1):
+            ranked.append(
+                SemanticCandidateHit(
+                    doc_id=hit.doc_id,
+                    score=hit.score,
+                    rank=rank_idx,
+                    raw_distance=hit.raw_distance,
+                    chunk_count=hit.chunk_count,
+                )
+            )
+        return ranked
 
     def _execute_ilike_fallback(
         self,
@@ -294,7 +383,7 @@ class SearchService:
         effective_query: str = clean_query
 
         if search_context_token:
-            # Subsequent page: resolve context
+            # Subsequent page: resolve context and preserve actual retrieval metadata from page 1
             context = SearchContextManager.get_and_validate_context(
                 db=db,
                 token=search_context_token,
@@ -307,7 +396,9 @@ class SearchService:
             context_token = context.token
             effective_query = context.query
             engine_requested = context.mode
-            engine_used = context.mode
+            engine_used = context.engine_used or context.mode
+            is_degraded = bool(context.is_degraded)
+            degraded_reason = context.degraded_reason
             index_generation_id = context.index_generation_id
             candidate_ids = context.candidate_ids or []
             scores = context.candidate_scores or []
@@ -365,7 +456,7 @@ class SearchService:
                         snapshot_total = sres.total_matches
                         snapshot_candidate_count = len(candidate_ids)
                         is_approximate_total = False
-                    except Exception as e:
+                    except Exception:
                         # Corrupted or unreadable index generation -> Fallback to ILIKE
                         hits = self._execute_ilike_fallback(
                             db=db,
@@ -390,11 +481,8 @@ class SearchService:
                 sem_hits, sem_error = self.adapter.query(clean_query, top_k=100, db=db)
                 if sem_error is not None:
                     # Semantic failure: ChromaDB offline or SentenceTransformer unavailable
-                    # Fallback to BM25! Declare fallback_bm25, NO fake success!
-                    engine_used = "fallback_bm25"
+                    # Fallback to BM25 (or double-fallback to ILIKE if lexical index is also unavailable)
                     is_degraded = True
-                    degraded_reason = sem_error
-
                     if active_gen:
                         try:
                             sq = SearchQuery(
@@ -407,6 +495,8 @@ class SearchService:
                                 top_k=100,
                             )
                             sres = self.engine.search(sq)
+                            engine_used = "fallback_bm25"
+                            degraded_reason = sem_error
                             candidate_ids = [h.doc_id for h in sres.candidates]
                             for h in sres.candidates:
                                 candidate_scores_map[h.doc_id] = h.score
@@ -414,23 +504,41 @@ class SearchService:
                             snapshot_candidate_count = len(candidate_ids)
                             is_approximate_total = False
                         except Exception:
-                            hits = self._execute_ilike_fallback(db, clean_query, clean_category_id, clean_tag_ids, date_from_utc, date_to_utc)
+                            hits = self._execute_ilike_fallback(
+                                db, clean_query, clean_category_id, clean_tag_ids, date_from_utc, date_to_utc
+                            )
+                            engine_used = "ilike_fallback"
+                            degraded_reason = f"{sem_error}; lexical index generation unavailable; serving ILIKE"
                             candidate_ids = [h.doc_id for h in hits]
                             for h in hits:
                                 candidate_scores_map[h.doc_id] = h.score
                             snapshot_total = len(candidate_ids)
                             snapshot_candidate_count = len(candidate_ids)
+                            is_approximate_total = False
                     else:
-                        hits = self._execute_ilike_fallback(db, clean_query, clean_category_id, clean_tag_ids, date_from_utc, date_to_utc)
+                        hits = self._execute_ilike_fallback(
+                            db, clean_query, clean_category_id, clean_tag_ids, date_from_utc, date_to_utc
+                        )
+                        engine_used = "ilike_fallback"
+                        degraded_reason = f"{sem_error}; lexical index generation unavailable; serving ILIKE"
                         candidate_ids = [h.doc_id for h in hits]
                         for h in hits:
                             candidate_scores_map[h.doc_id] = h.score
                         snapshot_total = len(candidate_ids)
                         snapshot_candidate_count = len(candidate_ids)
+                        is_approximate_total = False
                 else:
-                    # Semantic succeeded
-                    candidate_ids = [h.doc_id for h in sem_hits]
-                    for h in sem_hits:
+                    # Semantic succeeded: filter dense candidates BEFORE snapshot & context creation
+                    filtered_sem_hits = self._filter_semantic_candidates(
+                        db=db,
+                        sem_hits=sem_hits,
+                        category_id=clean_category_id,
+                        tag_ids=clean_tag_ids,
+                        date_from_utc=date_from_utc,
+                        date_to_utc=date_to_utc,
+                    )
+                    candidate_ids = [h.doc_id for h in filtered_sem_hits]
+                    for h in filtered_sem_hits:
                         candidate_scores_map[h.doc_id] = h.score
                     snapshot_total = None
                     snapshot_candidate_count = len(candidate_ids)
@@ -439,6 +547,7 @@ class SearchService:
             elif mode_cleaned == "hybrid":
                 # Execute BM25 candidates
                 bm25_hits: List[CandidateHit] = []
+                bm25_fell_back_to_ilike = False
                 if active_gen:
                     try:
                         sq = SearchQuery(
@@ -453,17 +562,28 @@ class SearchService:
                         sres = self.engine.search(sq)
                         bm25_hits = sres.candidates
                     except Exception:
-                        bm25_hits = self._execute_ilike_fallback(db, clean_query, clean_category_id, clean_tag_ids, date_from_utc, date_to_utc)
+                        bm25_hits = self._execute_ilike_fallback(
+                            db, clean_query, clean_category_id, clean_tag_ids, date_from_utc, date_to_utc
+                        )
+                        bm25_fell_back_to_ilike = True
                 else:
-                    bm25_hits = self._execute_ilike_fallback(db, clean_query, clean_category_id, clean_tag_ids, date_from_utc, date_to_utc)
+                    bm25_hits = self._execute_ilike_fallback(
+                        db, clean_query, clean_category_id, clean_tag_ids, date_from_utc, date_to_utc
+                    )
+                    bm25_fell_back_to_ilike = True
 
                 # Execute Semantic candidates
                 sem_hits, sem_error = self.adapter.query(clean_query, top_k=100, db=db)
                 if sem_error is not None:
-                    # Vector component unavailable -> Fallback to pure Okapi BM25
-                    engine_used = "fallback_bm25"
                     is_degraded = True
-                    degraded_reason = "Vector component unavailable; serving BM25"
+                    if bm25_fell_back_to_ilike:
+                        # Double fallback: both vector and lexical index unavailable
+                        engine_used = "ilike_fallback"
+                        degraded_reason = "Vector component and lexical index generation unavailable; serving ILIKE"
+                    else:
+                        # Vector component unavailable -> Fallback to pure Okapi BM25
+                        engine_used = "fallback_bm25"
+                        degraded_reason = "Vector component unavailable; serving BM25"
                     candidate_ids = [h.doc_id for h in bm25_hits]
                     for h in bm25_hits:
                         candidate_scores_map[h.doc_id] = h.score
@@ -471,8 +591,20 @@ class SearchService:
                     snapshot_candidate_count = len(candidate_ids)
                     is_approximate_total = False
                 else:
+                    # Filter dense candidates BEFORE RRF fusion, candidate snapshot, and context creation
+                    filtered_sem_hits = self._filter_semantic_candidates(
+                        db=db,
+                        sem_hits=sem_hits,
+                        category_id=clean_category_id,
+                        tag_ids=clean_tag_ids,
+                        date_from_utc=date_from_utc,
+                        date_to_utc=date_to_utc,
+                    )
+                    if bm25_fell_back_to_ilike:
+                        is_degraded = True
+                        degraded_reason = "Lexical index generation unavailable; hybrid fused with ILIKE"
                     # Fuse using RRF
-                    fused_hits = fuse_candidates_rrf(bm25_hits, sem_hits, top_k=100)
+                    fused_hits = fuse_candidates_rrf(bm25_hits, filtered_sem_hits, top_k=100)
                     candidate_ids = [h.doc_id for h in fused_hits]
                     for h in fused_hits:
                         candidate_scores_map[h.doc_id] = h.score
@@ -509,6 +641,9 @@ class SearchService:
                 snapshot_total=snapshot_total,
                 snapshot_candidate_count=snapshot_candidate_count,
                 is_approximate_total=is_approximate_total,
+                engine_used=engine_used,
+                is_degraded=is_degraded,
+                degraded_reason=degraded_reason,
             )
             context_token = context_record.token
             exp_dt = context_record.expires_at

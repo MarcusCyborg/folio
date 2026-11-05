@@ -1,7 +1,30 @@
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Union
-from src.backend.models.document import Document
+from sqlalchemy.orm import object_session
+from src.backend.models.document import Document, DocumentTag
+
+
+def _normalize_deleted_at(deleted_at: Optional[Union[datetime, str]]) -> str:
+    """
+    Normalizes deleted_at so pre-commit timezone-aware UTC datetimes and
+    post-commit PostgreSQL TIMESTAMP WITHOUT TIME ZONE datetimes hash identically.
+    """
+    if not deleted_at:
+        return ""
+    if isinstance(deleted_at, str):
+        s = deleted_at.strip()
+        if not s:
+            return ""
+        try:
+            deleted_at = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            return s
+    if isinstance(deleted_at, datetime):
+        if deleted_at.tzinfo is not None:
+            deleted_at = deleted_at.astimezone(timezone.utc).replace(tzinfo=None)
+        return deleted_at.isoformat()
+    return str(deleted_at)
 
 
 def compute_document_hash(
@@ -17,9 +40,7 @@ def compute_document_hash(
     Computes a deterministic SHA-256 hash representing a document's indexed state.
     Used for stale-revision protection, outbox synchronization, and change detection.
     """
-    del_str = ""
-    if deleted_at:
-        del_str = deleted_at.isoformat() if isinstance(deleted_at, datetime) else str(deleted_at)
+    del_str = _normalize_deleted_at(deleted_at)
 
     sorted_tags = sorted(tag_ids or [])
     tag_component = ",".join(sorted_tags)
@@ -38,8 +59,24 @@ def compute_document_hash(
 
 
 def compute_doc_instance_hash(doc: Document) -> str:
-    """Convenience helper extracting values from a Document ORM instance."""
-    tag_ids = [dt.tag_id for dt in doc.document_tags] if doc.document_tags else []
+    """
+    Convenience helper extracting values from a Document ORM instance.
+    When bound to a SQLAlchemy session, flushes pending mutations in the transaction
+    and queries DocumentTag rows directly to avoid stale identity-map relationship state.
+    """
+    sess = object_session(doc)
+    if sess is not None and doc.id:
+        if sess.new or sess.dirty or sess.deleted:
+            sess.flush()
+        tag_rows = (
+            sess.query(DocumentTag.tag_id)
+            .filter(DocumentTag.document_id == doc.id)
+            .all()
+        )
+        tag_ids = [row[0] for row in tag_rows]
+    else:
+        tag_ids = [dt.tag_id for dt in doc.document_tags] if doc.document_tags else []
+
     return compute_document_hash(
         title=doc.title,
         summary=doc.summary,

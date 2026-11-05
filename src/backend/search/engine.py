@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Any
+from typing import Dict, List, Optional, Set, Tuple, Any
 from sqlalchemy.orm import Session
 
 from src.backend.search.analyzer import TextAnalyzer, default_analyzer
@@ -64,6 +64,7 @@ class SearchResponse:
 class SearchEngine:
     """
     Search retrieval engine supporting multi-generation index caching,
+    automatic disk-version invalidation across processes,
     postings-based candidate aggregation, exact taxonomy/date filtering,
     and deterministic Okapi BM25 scoring.
     """
@@ -75,34 +76,71 @@ class SearchEngine:
         self.analyzer = analyzer or default_analyzer
         # Cache of loaded InvertedIndex by generation_id
         self._index_cache: Dict[str, InvertedIndex] = {}
+        # Disk signature (index_version, checksum, mtime, size) per generation_id
+        self._index_signatures: Dict[str, Optional[Tuple[Any, ...]]] = {}
+        # Remembered storage directory per generation_id
+        self._index_dirs: Dict[str, Path] = {}
 
     def get_or_load_index(
         self,
         generation_id: str,
         storage_dir: Optional[Path] = None,
     ) -> InvertedIndex:
-        """Loads and caches the inverted index for generation_id."""
-        if generation_id in self._index_cache:
-            return self._index_cache[generation_id]
-
-        if storage_dir is None:
+        """
+        Loads and caches the inverted index for generation_id.
+        Automatically detects on-disk updates (via atomic index_stats.json version/checksum signature)
+        and reloads the index when modified by an external worker process or save operation.
+        """
+        if storage_dir is not None:
+            effective_dir = Path(storage_dir)
+            self._index_dirs[generation_id] = effective_dir
+        elif generation_id in self._index_dirs:
+            effective_dir = self._index_dirs[generation_id]
+        else:
             storage = GenerationStorage(generation_id)
-            storage_dir = storage.postings_dir
+            effective_dir = storage.postings_dir
 
-        index = InvertedIndex.load(storage_dir, expected_generation_id=generation_id)
+        disk_sig = InvertedIndex.read_disk_signature(effective_dir)
+
+        if generation_id in self._index_cache:
+            cached_sig = self._index_signatures.get(generation_id)
+            if disk_sig is None:
+                if cached_sig is None:
+                    # Purely in-memory registered index without disk backing
+                    return self._index_cache[generation_id]
+                # Previously disk-backed index whose files were removed/corrupted
+                self._index_cache.pop(generation_id, None)
+                self._index_signatures.pop(generation_id, None)
+            elif cached_sig == disk_sig:
+                return self._index_cache[generation_id]
+
+        index = InvertedIndex.load(effective_dir, expected_generation_id=generation_id)
+        new_sig = InvertedIndex.read_disk_signature(effective_dir)
         self._index_cache[generation_id] = index
+        self._index_signatures[generation_id] = new_sig
+        self._index_dirs[generation_id] = effective_dir
         return index
 
-    def register_index(self, index: InvertedIndex):
+    def register_index(self, index: InvertedIndex, storage_dir: Optional[Path] = None):
         """Registers an in-memory InvertedIndex into the engine cache."""
         self._index_cache[index.generation_id] = index
+        if storage_dir is not None:
+            effective_dir = Path(storage_dir)
+            self._index_dirs[index.generation_id] = effective_dir
+            self._index_signatures[index.generation_id] = InvertedIndex.read_disk_signature(effective_dir)
+        else:
+            self._index_signatures[index.generation_id] = None
 
     def clear_cache(self, generation_id: Optional[str] = None):
         """Clears memory cache for a single generation or all generations."""
         if generation_id:
             self._index_cache.pop(generation_id, None)
+            self._index_signatures.pop(generation_id, None)
+            self._index_dirs.pop(generation_id, None)
         else:
             self._index_cache.clear()
+            self._index_signatures.clear()
+            self._index_dirs.clear()
 
     def _matches_filters(
         self,

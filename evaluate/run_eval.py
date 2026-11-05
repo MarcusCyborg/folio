@@ -1,16 +1,19 @@
 #!/usr/bin/env python
 """
-Folio IR Evaluation Scientist CLI — Milestone M6 (P06).
+Folio IR Evaluation Scientist CLI — Milestone M6 (P06) & Integration B Remediation (IB-R05).
 
 Reproducible IR evaluation and benchmarking tool:
 - Validates corpus snapshot, queries, and qrels by canonical Folio Document ID
 - Compares ILIKE baseline, TF-IDF, Okapi BM25, Semantic (ChromaDB + SentenceTransformers), and Hybrid (RRF)
 - Computes standard IR metrics: P@5, P@10, Recall@10, MAP@10, MRR@10, nDCG@10
-- Measures cold/warm p50/p95 latency, build time, index disk size, process RAM, concurrency, and engine fallback
-- Exports versioned results JSON and visualization charts
+- Includes failed/timeout queries as 0.0 in the positive quality denominator (never silently dropped)
+- Distinguishes successful, failed, timeout, and degraded queries in per-query and operational reports
+- Verifies fallback via real SearchService execution against missing/broken index generations
+- Records dynamic Git commit SHA, explicit latency boundaries, and BLOCKED_ENV when ChromaDB/model is absent
 """
 
 import os
+import subprocess
 import sys
 
 # Ensure UTF-8 output encoding on Windows consoles
@@ -54,6 +57,72 @@ except ImportError:
     plt = None
 
 
+def resolve_git_commit_sha() -> str:
+    """Dynamically resolves the current Git HEAD SHA of the workspace."""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        sha = (proc.stdout or "").strip()
+        if proc.returncode == 0 and sha:
+            return sha
+    except Exception:
+        pass
+    return "unknown"
+
+
+def build_latency_boundaries(
+    semantic_available: bool,
+    semantic_error_reason: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Documents the exact measurement boundaries for each evaluated engine family."""
+    return {
+        "retrieval_only": {
+            "engines": ["tfidf"],
+            "includes": [
+                "query tokenization",
+                "in-memory inverted index posting traversal",
+                "TF-IDF scoring and deterministic tie-break sorting",
+            ],
+            "excludes": [
+                "SearchService orchestration",
+                "PostgreSQL active generation lookup",
+                "SearchContext persistence",
+                "ORM Document hydration",
+                "FastAPI HTTP/network serialization",
+            ],
+        },
+        "service_api_database": {
+            "engines": ["ilike", "bm25", "semantic", "hybrid"],
+            "includes": [
+                "SearchService orchestration",
+                "PostgreSQL active generation lookup or ILIKE SQL execution",
+                "PostgreSQL candidate metadata filtering",
+                "SearchContext creation and DB commit",
+                "ORM Document hydration",
+            ],
+            "excludes": [
+                "FastAPI HTTP transport and JSON network serialization",
+            ],
+        },
+        "semantic_model_latency": {
+            "engines": ["semantic", "hybrid"],
+            "included_in_measured_latency": bool(semantic_available),
+            "status": "MEASURED" if semantic_available else "BLOCKED_ENV",
+            "reason": None if semantic_available else (semantic_error_reason or "Semantic backend unavailable"),
+            "description": (
+                "Includes SentenceTransformer query embedding and ChromaDB HNSW lookup when available; "
+                "when status is BLOCKED_ENV, measured latency reflects transparent fallback_bm25 execution only."
+            ),
+        },
+    }
+
+
 # ==============================================================================
 # 1. METRICS COMPUTATION (Pure Mathematical Functions)
 # ==============================================================================
@@ -90,7 +159,7 @@ def compute_average_precision_at_k(retrieved_ids: List[str], relevant_qrels: Dic
     total_rel = sum(1 for grade in relevant_qrels.values() if grade > 0)
     if total_rel == 0:
         return 0.0
-    
+
     hits = 0
     sum_precisions = 0.0
     top_k = retrieved_ids[:k]
@@ -98,7 +167,7 @@ def compute_average_precision_at_k(retrieved_ids: List[str], relevant_qrels: Dic
         if doc_id in relevant_qrels and relevant_qrels[doc_id] > 0:
             hits += 1
             sum_precisions += hits / i
-            
+
     denominator = min(k, total_rel)
     return sum_precisions / denominator if denominator > 0 else 0.0
 
@@ -269,7 +338,6 @@ class RetrievalEvaluator:
     def __init__(self, db_session, index_generation_id: Optional[str] = None):
         self.db = db_session
         from src.backend.services.search.search_service import SearchService
-        from src.backend.search.engine import SearchEngine, SearchQuery
         from src.backend.search.analyzer import default_analyzer
         from src.backend.search.tfidf import TfIdfScorer
         from src.backend.search_index.manager import GenerationManager
@@ -387,8 +455,6 @@ class RetrievalEvaluator:
         doc_ids = [it.id for it in res.items]
         scores = {it.id: round(1.0 / rank, 6) for rank, it in enumerate(res.items, start=1)}
         return doc_ids, scores, elapsed_ms, res.engine_used, res.is_degraded, res.degraded_reason
-        scores = {it.id: round(1.0 / rank, 6) for rank, it in enumerate(res.items, start=1)}
-        return doc_ids, scores, elapsed_ms, res.engine_used, res.is_degraded, res.degraded_reason
 
 
 # ==============================================================================
@@ -404,7 +470,6 @@ class PerformanceBenchmarker:
 
     def measure_latency_percentiles(self, engine_func, warm_runs: int = 5) -> Dict[str, float]:
         """Measures cold and warm latency percentiles (p50, p95)."""
-        # Cold run
         cold_latencies = []
         for q in self.queries[:10]:
             _, _, elapsed_ms, _, _, _ = engine_func(q["query"], top_k=10)
@@ -414,7 +479,6 @@ class PerformanceBenchmarker:
         cold_p50 = cold_latencies[int(len(cold_latencies) * 0.50)]
         cold_p95 = cold_latencies[int(len(cold_latencies) * 0.95)] if len(cold_latencies) > 1 else cold_latencies[-1]
 
-        # Warm runs
         warm_latencies = []
         for _ in range(warm_runs):
             for q in self.queries:
@@ -440,7 +504,7 @@ class PerformanceBenchmarker:
         for workers in concurrency_levels:
             total_requests = workers * requests_per_worker
             latencies = []
-            
+
             def worker_task(q_text):
                 worker_db = SessionLocal()
                 try:
@@ -483,8 +547,10 @@ class PerformanceBenchmarker:
         else:
             rss_mb = 0.0
 
-        # Index directory size
-        gen_dir = Path("data/search_index/generations") / generation_id
+        from src.backend.search_index.storage import get_index_storage_root
+        gen_dir = get_index_storage_root() / generation_id
+        if not gen_dir.exists():
+            gen_dir = Path("data/search_index/generations") / generation_id
         disk_size_bytes = 0
         file_count = 0
         if gen_dir.exists():
@@ -502,34 +568,251 @@ class PerformanceBenchmarker:
         }
 
     def verify_fallbacks(self, evaluator: RetrievalEvaluator) -> Dict[str, Any]:
-        """Verifies graceful fallback under missing index and offline vector store."""
-        results = {}
+        """Verifies graceful fallback via real SearchService execution when active index generation is missing/broken."""
+        from src.backend.models.search_index import IndexGeneration
+        results: Dict[str, Any] = {}
 
-        # 1. Test missing index -> fallback to ILIKE
+        # 1. Test missing/unavailable active index generation -> SearchService(mode="bm25") must fallback to ilike_fallback
         orig_gen = evaluator.generation_id
+        saved_statuses: List[Tuple[Any, str]] = []
         evaluator.service.engine.clear_cache()
         try:
-            # Temporarily point to non-existent generation
-            doc_ids, scores, elapsed_ms, engine_used, is_degraded, degraded_reason = evaluator.execute_ilike("Deep learning", top_k=5)
+            if self.db is not None and hasattr(self.db, "query"):
+                active_gens = (
+                    self.db.query(IndexGeneration)
+                    .filter(IndexGeneration.status == "active")
+                    .all()
+                )
+                for g in active_gens:
+                    saved_statuses.append((g, g.status))
+                    g.status = "failed"
+                if saved_statuses and hasattr(self.db, "flush"):
+                    self.db.flush()
+
+            evaluator.generation_id = None
+            doc_ids, scores, elapsed_ms, engine_used, is_degraded, degraded_reason = evaluator.execute_bm25(
+                "Deep learning", top_k=5, db=self.db
+            )
+            verified = bool(
+                engine_used == "ilike_fallback"
+                and is_degraded is True
+                and bool(degraded_reason)
+            )
             results["missing_index_fallback"] = {
-                "verified": True,
+                "verified": verified,
+                "requested_mode": "bm25",
                 "engine_used": engine_used,
                 "is_degraded": is_degraded,
                 "degraded_reason": degraded_reason,
                 "returned_count": len(doc_ids),
             }
         finally:
+            for g, orig_status in saved_statuses:
+                g.status = orig_status
+            if saved_statuses and hasattr(self.db, "flush"):
+                self.db.flush()
+            if saved_statuses and hasattr(self.db, "commit"):
+                self.db.commit()
             evaluator.generation_id = orig_gen
 
         # 2. Test semantic degradation declaration
         is_avail, error_reason = evaluator.service.adapter.check_availability()
         results["semantic_adapter_status"] = {
             "available": is_avail,
+            "status": "READY" if is_avail else "BLOCKED_ENV",
             "error_reason": error_reason,
-            "note": "When unavailable, system transparently reports fallback_bm25 without fake success."
+            "note": "When unavailable (BLOCKED_ENV), system transparently reports fallback_bm25 without synthetic metrics.",
         }
 
         return results
+
+
+def evaluate_engine_queries(
+    eng_name: str,
+    method,
+    eval_queries: List[Dict[str, Any]],
+    qrels: Dict[str, Dict[str, int]],
+    k: int = 10,
+    semantic_available: bool = True,
+) -> Dict[str, Any]:
+    """
+    Executes all benchmark queries for a single engine and computes aggregate metrics.
+    Guarantees that failed or timed-out positive queries contribute 0.0 to the quality denominator
+    rather than being silently omitted.
+    """
+    per_query_records = []
+    p5_list = []
+    p10_list = []
+    recall10_list = []
+    ap10_list = []
+    mrr10_list = []
+    ndcg10_list = []
+    latencies_ms = []
+
+    negative_stats = {"total": 0, "false_positives": 0, "empty_retrievals": 0}
+    successful_count = 0
+    failed_count = 0
+    timeout_count = 0
+    degraded_count = 0
+    error_count = 0
+
+    t0_engine = time.perf_counter()
+
+    for q in eval_queries:
+        qid = q["query_id"]
+        qtext = q["query"]
+        cat = q.get("category", "")
+        q_qrels = qrels.get(qid, {})
+        is_negative = (cat == "negative" or len(q_qrels) == 0)
+
+        try:
+            doc_ids, scores, elapsed_ms, engine_used, is_degraded, degraded_reason = method(qtext, top_k=k)
+            latencies_ms.append(elapsed_ms)
+            successful_count += 1
+            if is_degraded:
+                degraded_count += 1
+                query_status = "degraded"
+            else:
+                query_status = "successful"
+
+            p5 = compute_precision_at_k(doc_ids, q_qrels, 5)
+            p10 = compute_precision_at_k(doc_ids, q_qrels, 10)
+            rec10 = compute_recall_at_k(doc_ids, q_qrels, 10)
+            ap10 = compute_average_precision_at_k(doc_ids, q_qrels, 10)
+            mrr10 = compute_reciprocal_rank_at_k(doc_ids, q_qrels, 10)
+            ndcg10 = compute_ndcg_at_k(doc_ids, q_qrels, 10)
+
+            if is_negative:
+                negative_stats["total"] += 1
+                if len(doc_ids) > 0:
+                    negative_stats["false_positives"] += 1
+                else:
+                    negative_stats["empty_retrievals"] += 1
+            else:
+                p5_list.append(p5)
+                p10_list.append(p10)
+                recall10_list.append(rec10)
+                ap10_list.append(ap10)
+                mrr10_list.append(mrr10)
+                ndcg10_list.append(ndcg10)
+
+            per_query_records.append({
+                "query_id": qid,
+                "query": qtext,
+                "category": cat,
+                "split": q.get("split"),
+                "status": query_status,
+                "retrieved_doc_ids": doc_ids,
+                "scores": scores,
+                "engine_used": engine_used,
+                "is_degraded": is_degraded,
+                "degraded_reason": degraded_reason,
+                "metrics": {
+                    "p5": round(p5, 4),
+                    "p10": round(p10, 4),
+                    "recall10": round(rec10, 4),
+                    "ap10": round(ap10, 4),
+                    "mrr10": round(mrr10, 4),
+                    "ndcg10": round(ndcg10, 4),
+                    "latency_ms": round(elapsed_ms, 2),
+                },
+            })
+
+        except Exception as e:
+            error_count += 1
+            is_timeout = isinstance(e, TimeoutError) or ("timeout" in type(e).__name__.lower())
+            if is_timeout:
+                timeout_count += 1
+                query_status = "timeout"
+            else:
+                failed_count += 1
+                query_status = "failed"
+
+            # Never omit failed or timed-out queries from the quality denominator
+            if is_negative:
+                negative_stats["total"] += 1
+            else:
+                p5_list.append(0.0)
+                p10_list.append(0.0)
+                recall10_list.append(0.0)
+                ap10_list.append(0.0)
+                mrr10_list.append(0.0)
+                ndcg10_list.append(0.0)
+
+            per_query_records.append({
+                "query_id": qid,
+                "query": qtext,
+                "category": cat,
+                "split": q.get("split"),
+                "status": query_status,
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "retrieved_doc_ids": [],
+                "scores": {},
+                "engine_used": "error",
+                "is_degraded": True,
+                "degraded_reason": str(e),
+                "metrics": {
+                    "p5": 0.0,
+                    "p10": 0.0,
+                    "recall10": 0.0,
+                    "ap10": 0.0,
+                    "mrr10": 0.0,
+                    "ndcg10": 0.0,
+                    "latency_ms": 0.0,
+                },
+            })
+
+    total_engine_time = time.perf_counter() - t0_engine
+
+    # Aggregate Metrics over ALL positive queries (including failed/timeout queries as 0.0)
+    n_pos = len(p10_list)
+    latency_boundary = "retrieval_only" if eng_name == "tfidf" else "service_api_database"
+    env_status = (
+        "BLOCKED_ENV"
+        if (eng_name in ("semantic", "hybrid") and not semantic_available)
+        else "READY"
+    )
+
+    agg_metrics = {
+        "quality_denominator_positive_queries": n_pos,
+        "mean_p5": round(sum(p5_list) / n_pos, 4) if n_pos else 0.0,
+        "mean_p10": round(sum(p10_list) / n_pos, 4) if n_pos else 0.0,
+        "mean_recall10": round(sum(recall10_list) / n_pos, 4) if n_pos else 0.0,
+        "MAP10": round(sum(ap10_list) / n_pos, 4) if n_pos else 0.0,
+        "MRR10": round(sum(mrr10_list) / n_pos, 4) if n_pos else 0.0,
+        "nDCG10": round(sum(ndcg10_list) / n_pos, 4) if n_pos else 0.0,
+        "latency_p50_ms": round(sorted(latencies_ms)[int(len(latencies_ms) * 0.50)], 2) if latencies_ms else 0.0,
+        "latency_p95_ms": round(sorted(latencies_ms)[int(len(latencies_ms) * 0.95)], 2) if latencies_ms else 0.0,
+        "mean_latency_ms": round(sum(latencies_ms) / len(latencies_ms), 2) if latencies_ms else 0.0,
+        "total_execution_time_sec": round(total_engine_time, 3),
+        "latency_boundary": latency_boundary,
+    }
+
+    negative_report = {
+        "total_negative_queries": negative_stats["total"],
+        "empty_result_count": negative_stats["empty_retrievals"],
+        "false_positive_count": negative_stats["false_positives"],
+        "false_positive_rate": round(negative_stats["false_positives"] / negative_stats["total"], 4) if negative_stats["total"] else 0.0,
+    }
+
+    operational_health = {
+        "total_queries": len(eval_queries),
+        "quality_denominator_positive_queries": n_pos,
+        "successful_count": successful_count,
+        "failed_count": failed_count,
+        "timeout_count": timeout_count,
+        "degraded_count": degraded_count,
+        "error_count": error_count,
+        "environment_status": env_status,
+    }
+
+    return {
+        "aggregate_metrics": agg_metrics,
+        "negative_queries_analysis": negative_report,
+        "operational_health": operational_health,
+        "per_query_results": per_query_records,
+    }
 
 
 # ==============================================================================
@@ -548,10 +831,12 @@ def run_evaluation(
     selected_engines: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Runs complete end-to-end evaluation and exports artifacts."""
+    commit_sha = resolve_git_commit_sha()
     print("=" * 80)
     print("FOLIO RETRIEVAL EVALUATION & BENCHMARK HARNESS (P06)")
     print(f"Timestamp: {datetime.now(timezone.utc).isoformat()}")
     print(f"Workspace: {PROJECT_ROOT}")
+    print(f"Commit   : {commit_sha}")
     print("=" * 80)
 
     # 1. Load Datasets
@@ -583,7 +868,10 @@ def run_evaluation(
     print("  Status: VALIDATION PASSED (Zero integrity violations)\n")
 
     if validate_only:
-        return {"validation": val_report}
+        return {
+            "commit_sha": commit_sha,
+            "validation": val_report,
+        }
 
     # 3. Filter Queries by Split
     all_queries = queries_data.get("queries", [])
@@ -597,8 +885,12 @@ def run_evaluation(
     db = SessionLocal()
 
     evaluator = RetrievalEvaluator(db)
+    sem_avail, sem_error = evaluator.service.adapter.check_availability()
+    sem_env_status = "READY" if sem_avail else "BLOCKED_ENV"
+    latency_boundaries = build_latency_boundaries(sem_avail, sem_error)
+
     print(f"  Active Index Generation: {evaluator.generation_id}")
-    print(f"  Semantic Adapter Status: {evaluator.service.adapter.check_availability()}")
+    print(f"  Semantic Adapter Status: {(sem_avail, sem_error)} [{sem_env_status}]")
 
     # Determine engines to evaluate
     available_engines = ["ilike", "tfidf", "bm25", "semantic", "hybrid"]
@@ -625,123 +917,16 @@ def run_evaluation(
     for eng_name in target_engines:
         method = engine_methods[eng_name]
         print(f"  -> Running engine: '{eng_name}' ...", end="", flush=True)
-
-        per_query_records = []
-        p5_list = []
-        p10_list = []
-        recall10_list = []
-        ap10_list = []
-        mrr10_list = []
-        ndcg10_list = []
-        latencies_ms = []
-
-        negative_stats = {"total": 0, "false_positives": 0, "empty_retrievals": 0}
-        error_count = 0
-        timeout_count = 0
-        degraded_count = 0
-
-        t0_engine = time.perf_counter()
-
-        for q in eval_queries:
-            qid = q["query_id"]
-            qtext = q["query"]
-            cat = q.get("category", "")
-            q_qrels = qrels.get(qid, {})
-            is_negative = (cat == "negative" or len(q_qrels) == 0)
-
-            try:
-                doc_ids, scores, elapsed_ms, engine_used, is_degraded, degraded_reason = method(qtext, top_k=k)
-                latencies_ms.append(elapsed_ms)
-                if is_degraded:
-                    degraded_count += 1
-
-                p5 = compute_precision_at_k(doc_ids, q_qrels, 5)
-                p10 = compute_precision_at_k(doc_ids, q_qrels, 10)
-                rec10 = compute_recall_at_k(doc_ids, q_qrels, 10)
-                ap10 = compute_average_precision_at_k(doc_ids, q_qrels, 10)
-                mrr10 = compute_reciprocal_rank_at_k(doc_ids, q_qrels, 10)
-                ndcg10 = compute_ndcg_at_k(doc_ids, q_qrels, 10)
-
-                if is_negative:
-                    negative_stats["total"] += 1
-                    if len(doc_ids) > 0:
-                        negative_stats["false_positives"] += 1
-                    else:
-                        negative_stats["empty_retrievals"] += 1
-                else:
-                    p5_list.append(p5)
-                    p10_list.append(p10)
-                    recall10_list.append(rec10)
-                    ap10_list.append(ap10)
-                    mrr10_list.append(mrr10)
-                    ndcg10_list.append(ndcg10)
-
-                per_query_records.append({
-                    "query_id": qid,
-                    "query": qtext,
-                    "category": cat,
-                    "split": q.get("split"),
-                    "retrieved_doc_ids": doc_ids,
-                    "scores": scores,
-                    "engine_used": engine_used,
-                    "is_degraded": is_degraded,
-                    "degraded_reason": degraded_reason,
-                    "metrics": {
-                        "p5": round(p5, 4),
-                        "p10": round(p10, 4),
-                        "recall10": round(rec10, 4),
-                        "ap10": round(ap10, 4),
-                        "mrr10": round(mrr10, 4),
-                        "ndcg10": round(ndcg10, 4),
-                        "latency_ms": round(elapsed_ms, 2),
-                    }
-                })
-
-            except Exception as e:
-                error_count += 1
-                per_query_records.append({
-                    "query_id": qid,
-                    "query": qtext,
-                    "category": cat,
-                    "error": str(e)
-                })
-
-        total_engine_time = time.perf_counter() - t0_engine
-
-        # Aggregate Metrics over positive queries
-        n_pos = len(p10_list)
-        agg_metrics = {
-            "mean_p5": round(sum(p5_list) / n_pos, 4) if n_pos else 0.0,
-            "mean_p10": round(sum(p10_list) / n_pos, 4) if n_pos else 0.0,
-            "mean_recall10": round(sum(recall10_list) / n_pos, 4) if n_pos else 0.0,
-            "MAP10": round(sum(ap10_list) / n_pos, 4) if n_pos else 0.0,
-            "MRR10": round(sum(mrr10_list) / n_pos, 4) if n_pos else 0.0,
-            "nDCG10": round(sum(ndcg10_list) / n_pos, 4) if n_pos else 0.0,
-            "latency_p50_ms": round(sorted(latencies_ms)[int(len(latencies_ms) * 0.50)], 2) if latencies_ms else 0.0,
-            "latency_p95_ms": round(sorted(latencies_ms)[int(len(latencies_ms) * 0.95)], 2) if latencies_ms else 0.0,
-            "mean_latency_ms": round(sum(latencies_ms) / len(latencies_ms), 2) if latencies_ms else 0.0,
-            "total_execution_time_sec": round(total_engine_time, 3),
-        }
-
-        negative_report = {
-            "total_negative_queries": negative_stats["total"],
-            "empty_result_count": negative_stats["empty_retrievals"],
-            "false_positive_count": negative_stats["false_positives"],
-            "false_positive_rate": round(negative_stats["false_positives"] / negative_stats["total"], 4) if negative_stats["total"] else 0.0,
-        }
-
-        operational_health = {
-            "error_count": error_count,
-            "timeout_count": timeout_count,
-            "degraded_count": degraded_count,
-        }
-
-        engine_results[eng_name] = {
-            "aggregate_metrics": agg_metrics,
-            "negative_queries_analysis": negative_report,
-            "operational_health": operational_health,
-            "per_query_results": per_query_records,
-        }
+        eng_report = evaluate_engine_queries(
+            eng_name=eng_name,
+            method=method,
+            eval_queries=eval_queries,
+            qrels=qrels,
+            k=k,
+            semantic_available=sem_avail,
+        )
+        engine_results[eng_name] = eng_report
+        agg_metrics = eng_report["aggregate_metrics"]
         print(f" DONE (MAP@10={agg_metrics['MAP10']:.4f}, nDCG@10={agg_metrics['nDCG10']:.4f}, p50={agg_metrics['latency_p50_ms']}ms)")
 
     # 5. Performance Benchmarks
@@ -764,7 +949,7 @@ def run_evaluation(
         print(f"  Index Disk Size  : {footprint['index_disk_size_kb']} KB across {footprint['index_files_count']} files")
         print(f"  Process RAM RSS  : {footprint['ram_rss_mb']} MB")
 
-        # Latency Percentiles (cold vs warm) for BM25 and Semantic/Hybrid
+        # Latency Percentiles (cold vs warm) for BM25
         latency_bm25 = benchmarker.measure_latency_percentiles(evaluator.execute_bm25)
         print(f"  BM25 Latency     : Cold p50={latency_bm25['cold_p50_ms']}ms / p95={latency_bm25['cold_p95_ms']}ms | Warm p50={latency_bm25['warm_p50_ms']}ms / p95={latency_bm25['warm_p95_ms']}ms")
 
@@ -775,11 +960,12 @@ def run_evaluation(
 
         # Fallbacks verification
         fallbacks_data = benchmarker.verify_fallbacks(evaluator)
-        print(f"  Fallback Defense : {fallbacks_data['missing_index_fallback']['engine_used']} (is_degraded={fallbacks_data['missing_index_fallback']['is_degraded']})")
+        print(f"  Fallback Defense : {fallbacks_data['missing_index_fallback']['engine_used']} (verified={fallbacks_data['missing_index_fallback']['verified']})")
 
         perf_results = {
             "index_build_time_sec": build_duration_sec,
             "resource_footprint": footprint,
+            "latency_boundaries": latency_boundaries,
             "latency_percentiles": {
                 "bm25": latency_bm25,
             },
@@ -792,7 +978,7 @@ def run_evaluation(
     # 6. Generate Summary Table
     print("\n[STEP 5/5] GENERATING COMPARATIVE REPORT & ARTIFACTS")
     summary_table = []
-    headers = ["Engine", "P@5", "P@10", "Recall@10", "MAP@10", "MRR@10", "nDCG@10", "p50 (ms)", "p95 (ms)", "Degraded"]
+    headers = ["Engine", "P@5", "P@10", "Recall@10", "MAP@10", "MRR@10", "nDCG@10", "p50 (ms)", "p95 (ms)", "Failed", "Degraded"]
     for eng_name, eng_data in engine_results.items():
         m = eng_data["aggregate_metrics"]
         h = eng_data["operational_health"]
@@ -806,7 +992,8 @@ def run_evaluation(
             f"{m['nDCG10']:.4f}",
             f"{m['latency_p50_ms']:.2f}",
             f"{m['latency_p95_ms']:.2f}",
-            f"{h['degraded_count']}/{len(eval_queries)}"
+            f"{h['error_count']}/{len(eval_queries)}",
+            f"{h['degraded_count']}/{len(eval_queries)}",
         ])
 
     if tabulate:
@@ -821,13 +1008,17 @@ def run_evaluation(
     export_payload = {
         "evaluation_metadata": {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "commit_baseline": "693d031 (Milestone P05)",
+            "commit_sha": commit_sha,
+            "commit_baseline": commit_sha,
             "manifest_id": manifest.get("manifest_id"),
             "manifest_file": str(manifest_path),
             "manifest_sha256": manifest.get("fixture_sha256"),
             "analyzer_version": evaluator.analyzer.version,
             "index_generation_id": evaluator.generation_id,
             "embedding_model": "all-MiniLM-L6-v2",
+            "semantic_environment_status": sem_env_status,
+            "semantic_environment_reason": sem_error,
+            "latency_boundaries": latency_boundaries,
             "eval_split": split,
             "top_k": k,
             "evaluated_queries_count": len(eval_queries),

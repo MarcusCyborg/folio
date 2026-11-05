@@ -1,8 +1,12 @@
 # tests/frontend/public/test_search_results_ux.py
-# Playwright test suite for Folio Search Results UX, Safe Snippets, Ranking, Degradation & Pagination (M7 / UI-02)
+# Playwright test suite for Folio Search Results UX, Safe Snippets, Ranking, Degradation & Pagination (M7 / UI-02 & IB-R06)
 
 import pytest
 from playwright.sync_api import sync_playwright
+
+from tests.conftest import TestingSessionLocal
+from src.backend.models.search_index import IndexGeneration
+from src.backend.services.search.search_service import search_engine
 
 
 def test_search_ranking_and_safe_snippets(live_server, browser_instance):
@@ -37,6 +41,49 @@ def test_search_ranking_and_safe_snippets(live_server, browser_instance):
     assert "<script" not in html_content
     assert "onerror=" not in html_content
     assert "onpointerenter=" not in html_content
+
+    context.close()
+
+
+def test_healthy_bm25_mode_returns_bm25_without_degraded_banner(
+    live_server, browser_instance, active_lexical_index
+):
+    """
+    IB-R06: Verifies that when an active lexical index generation exists,
+    requesting mode=bm25 returns engine_used='bm25' with is_degraded=False,
+    renders the healthy BM25 telemetry badge, and does NOT display the degraded banner.
+    """
+    context = browser_instance.new_context(viewport={"width": 1366, "height": 768})
+    page = context.new_page()
+
+    search_payloads = []
+
+    def capture_search_response(response):
+        if "/api/v1/search" in response.url and response.status == 200:
+            try:
+                search_payloads.append(response.json())
+            except Exception:
+                pass
+
+    page.on("response", capture_search_response)
+
+    page.goto(f"{live_server}/#/library?q=learning&mode=bm25")
+    page.wait_for_selector(".document-card-row")
+
+    assert len(search_payloads) >= 1
+    latest = search_payloads[-1]
+    assert latest["engine_requested"] == "bm25"
+    assert latest["engine_used"] == "bm25"
+    assert latest["is_degraded"] is False
+    assert latest.get("degraded_reason") is None
+
+    # Healthy BM25 path must NOT show degraded banner
+    assert page.locator(".degraded-engine-banner").count() == 0
+    assert page.locator(".telemetry-badge.badge-degraded").count() == 0
+
+    telemetry_text = page.locator(".search-telemetry-bar").text_content()
+    assert "BM25" in telemetry_text
+    assert "ILIKE_FALLBACK" not in telemetry_text
 
     context.close()
 
@@ -80,6 +127,58 @@ def test_degraded_engine_banner_and_badge(live_server, browser_instance):
     degraded_badge = page.locator(".telemetry-badge.badge-degraded")
     assert degraded_badge.is_visible()
     assert "FALLBACK_BM25" in degraded_badge.text_content()
+
+    context.close()
+
+
+def test_deliberate_missing_index_fallback_displays_degraded_banner(
+    live_server, browser_instance
+):
+    """
+    IB-R06: Deliberately disables the active lexical index generation in PostgreSQL
+    and verifies the live backend returns engine_used='ilike_fallback' with is_degraded=True
+    and the UI displays the degraded engine banner.
+    """
+    db = TestingSessionLocal()
+    try:
+        for gen in db.query(IndexGeneration).all():
+            gen.status = "failed"
+        db.commit()
+    finally:
+        db.close()
+    search_engine.clear_cache()
+
+    context = browser_instance.new_context(viewport={"width": 1366, "height": 768})
+    page = context.new_page()
+
+    search_payloads = []
+
+    def capture_search_response(response):
+        if "/api/v1/search" in response.url and response.status == 200:
+            try:
+                search_payloads.append(response.json())
+            except Exception:
+                pass
+
+    page.on("response", capture_search_response)
+
+    page.goto(f"{live_server}/#/library?q=learning&mode=bm25")
+    page.wait_for_selector(".degraded-engine-banner")
+
+    assert len(search_payloads) >= 1
+    latest = search_payloads[-1]
+    assert latest["engine_requested"] == "bm25"
+    assert latest["engine_used"] == "ilike_fallback"
+    assert latest["is_degraded"] is True
+    assert latest.get("degraded_reason")
+
+    banner = page.locator(".degraded-engine-banner")
+    assert banner.is_visible()
+    assert "ilike_fallback" in banner.text_content()
+
+    degraded_badge = page.locator(".telemetry-badge.badge-degraded")
+    assert degraded_badge.is_visible()
+    assert "ILIKE_FALLBACK" in degraded_badge.text_content()
 
     context.close()
 
@@ -154,7 +253,7 @@ def test_search_pagination_with_context_token(live_server, browser_instance):
     context = browser_instance.new_context(viewport={"width": 1366, "height": 768})
     page = context.new_page()
 
-    page.goto(f"{live_server}/#/library?q=the&mode=bm25")
+    page.goto(f"{live_server}/#/library?q=learning&mode=bm25")
     page.wait_for_selector(".document-card-row")
 
     pagination = page.locator(".pagination")

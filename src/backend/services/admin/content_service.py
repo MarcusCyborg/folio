@@ -148,6 +148,8 @@ def admin_create_document(db: Session, data: DocumentWrite, user: User) -> dict:
         valid_tags = db.query(Tag).filter(Tag.id.in_(data.tag_ids)).all()
         for vt in valid_tags:
             db.add(DocumentTag(document_id=doc.id, tag_id=vt.id))
+        db.flush()
+    db.expire(doc, ["document_tags", "category"])
 
     write_audit(
         db,
@@ -160,6 +162,7 @@ def admin_create_document(db: Session, data: DocumentWrite, user: User) -> dict:
     record_revision_and_outbox_job(db, doc)
     db.commit()
     db.refresh(doc)
+    db.expire(doc, ["document_tags", "category"])
     return admin_get_document(db, doc.id)
 
 def admin_update_document(db: Session, doc_id: str, data: dict, user: User) -> dict:
@@ -203,12 +206,17 @@ def admin_update_document(db: Session, doc_id: str, data: dict, user: User) -> d
         doc.source_attribution = data["source_attribution"]
 
     if "tag_ids" in data and data["tag_ids"] is not None:
-        db.query(DocumentTag).filter(DocumentTag.document_id == doc.id).delete()
-        valid_tags = db.query(Tag).filter(Tag.id.in_(data["tag_ids"])).all()
-        for vt in valid_tags:
-            db.add(DocumentTag(document_id=doc.id, tag_id=vt.id))
+        db.query(DocumentTag).filter(DocumentTag.document_id == doc.id).delete(synchronize_session=False)
+        if data["tag_ids"]:
+            valid_tags = db.query(Tag).filter(Tag.id.in_(data["tag_ids"])).all()
+            for vt in valid_tags:
+                db.add(DocumentTag(document_id=doc.id, tag_id=vt.id))
+        db.flush()
+        db.expire(doc, ["document_tags"])
 
     doc.updated_at = datetime.now(timezone.utc)
+    db.flush()
+    db.expire(doc, ["document_tags", "category"])
     write_audit(
         db,
         actor=user,
@@ -220,6 +228,7 @@ def admin_update_document(db: Session, doc_id: str, data: dict, user: User) -> d
     )
     record_revision_and_outbox_job(db, doc)
     db.commit()
+    db.expire(doc, ["document_tags", "category"])
     return admin_get_document(db, doc.id)
 
 def admin_update_document_status(db: Session, doc_id: str, new_status: str, user: User) -> dict:
@@ -246,6 +255,7 @@ def admin_update_document_status(db: Session, doc_id: str, new_status: str, user
     before_status = doc.status
     doc.status = new_status
     doc.updated_at = datetime.now(timezone.utc)
+    db.flush()
 
     write_audit(
         db,
@@ -259,6 +269,7 @@ def admin_update_document_status(db: Session, doc_id: str, new_status: str, user
     op = "upsert" if doc.status == "published" else "delete"
     record_revision_and_outbox_job(db, doc, operation=op)
     db.commit()
+    db.expire(doc, ["document_tags", "category"])
     return admin_get_document(db, doc.id)
 
 def admin_delete_document(db: Session, doc_id: str, user: User):
@@ -267,6 +278,7 @@ def admin_delete_document(db: Session, doc_id: str, user: User):
         raise AppException(status_code=404, code="DOCUMENT_NOT_FOUND", message="Document not found")
 
     doc.deleted_at = datetime.now(timezone.utc)
+    db.flush()
     write_audit(
         db,
         actor=user,
@@ -353,6 +365,7 @@ def admin_update_category(db: Session, cat_id: str, data: CategoryUpdate, user: 
                 raise AppException(status_code=409, code="SLUG_EXISTS", message="Category with this slug already exists")
             cat.slug = slug_clean
 
+    db.flush()
     write_audit(
         db,
         actor=user,
@@ -459,6 +472,7 @@ def admin_update_tag(db: Session, tag_id: str, data: TagUpdate, user: User) -> d
                 raise AppException(status_code=409, code="SLUG_EXISTS", message="Tag with this slug already exists")
             tag.slug = slug_clean
 
+    db.flush()
     write_audit(
         db,
         actor=user,

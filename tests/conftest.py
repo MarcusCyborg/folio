@@ -93,6 +93,22 @@ def ensure_test_database_exists(db_url_str: str):
     )
 
 
+def build_active_lexical_index_for_engine(engine) -> str:
+    """Builds a fresh active lexical index generation for the given SQLAlchemy engine and resets reader cache."""
+    from src.backend.search_index.manager import GenerationManager
+    from src.backend.services.search.search_service import search_engine
+
+    session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    idx_db = session_factory()
+    try:
+        gen = GenerationManager.build_new_generation(idx_db, force=True)
+        gen_id = gen.id
+    finally:
+        idx_db.close()
+    search_engine.clear_cache()
+    return gen_id
+
+
 @pytest.fixture(scope="session", autouse=True)
 def prepare_test_database():
     """
@@ -149,14 +165,13 @@ def prepare_test_database():
             )
 
 
-def reset_browser_test_data(engine, manifest=None):
+def reset_browser_test_data(engine, manifest=None, build_index: bool = True):
     """
     Restores database state to pristine baseline after browser tests.
     Guarantees browser tests do not leak mutated state (settings, comments, reports, users, documents)
-    to subsequent tests regardless of test execution order.
+    to subsequent tests regardless of test execution order, and builds an active lexical index generation
+    so healthy BM25 requests do not inadvertently degrade to ILIKE_FALLBACK.
     """
-    # Browser requests commit across sessions. Restore all application rows in FK order,
-    # rather than deleting a hand-picked subset and leaking comments, settings or counters.
     from scripts.seed_folio import run_seed
     with engine.begin() as conn:
         if engine.dialect.name == "postgresql":
@@ -168,6 +183,14 @@ def reset_browser_test_data(engine, manifest=None):
         for table in reversed(Base.metadata.sorted_tables):
             conn.execute(table.delete())
     run_seed(target=engine)
+    if build_index:
+        build_active_lexical_index_for_engine(engine)
+
+
+@pytest.fixture
+def active_lexical_index():
+    """Ensures an active lexical index generation is built and ready for the live test database."""
+    return build_active_lexical_index_for_engine(test_engine)
 
 
 @pytest.fixture(autouse=True)
@@ -199,6 +222,8 @@ def db_session():
     Any commit within endpoints only commits to the savepoint;
     teardown rolls back the outer transaction, ensuring pristine DB state across all tests.
     """
+    from src.backend.core.rate_limit import rate_limiter
+
     connection = test_engine.connect()
     transaction = connection.begin()
     session = TestingSessionLocal(bind=connection, join_transaction_mode="create_savepoint")
@@ -209,6 +234,10 @@ def db_session():
         session.close()
         transaction.rollback()
         connection.close()
+        try:
+            rate_limiter.reset()
+        except Exception:
+            pass
 
 
 @pytest.fixture

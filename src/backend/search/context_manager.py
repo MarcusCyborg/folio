@@ -46,20 +46,28 @@ class SearchContextManager:
         snapshot_total: Optional[int] = None,
         snapshot_candidate_count: Optional[int] = None,
         is_approximate_total: bool = False,
+        engine_used: Optional[str] = None,
+        is_degraded: bool = False,
+        degraded_reason: Optional[str] = None,
         ttl_minutes: Optional[int] = None,
     ) -> SearchContext:
-        """Creates and stores a fresh SearchContext with absolute TTL."""
+        """Creates and stores a fresh SearchContext with absolute TTL and fallback metadata."""
         ttl = ttl_minutes if ttl_minutes is not None else settings.SEARCH_CONTEXT_TTL_MINUTES
         now = datetime.now(timezone.utc)
         expires_at = now + timedelta(minutes=ttl)
         token = str(uuid.uuid4())
         cand_count = snapshot_candidate_count if snapshot_candidate_count is not None else len(candidate_ids)
+        clean_mode = mode.strip().lower()
+        actual_engine = (engine_used or clean_mode).strip().lower()
 
         context = SearchContext(
             token=token,
             actor_key=actor_key,
             query=query.strip(),
-            mode=mode.strip().lower(),
+            mode=clean_mode,
+            engine_used=actual_engine,
+            is_degraded=bool(is_degraded),
+            degraded_reason=degraded_reason,
             filters_hash=filters_hash,
             page_size=page_size,
             index_generation_id=index_generation_id,

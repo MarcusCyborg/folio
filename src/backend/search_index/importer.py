@@ -302,6 +302,9 @@ class CorpusImporter:
                     if tag_obj:
                         self.db.add(DocumentTag(document_id=doc.id, tag_id=tag_obj.id))
 
+                self.db.flush()
+                self.db.expire(doc, ["document_tags"])
+
                 # Emit revision and outbox index job in same transaction
                 record_revision_and_outbox_job(self.db, doc)
                 existing_docs_by_url[d_info["source_url"]] = doc

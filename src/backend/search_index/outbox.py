@@ -19,9 +19,12 @@ def record_revision_and_outbox_job(
     in the SAME database transaction as the document mutation.
 
     Invariant:
+    - Flushes pending document and tag mutations in the active transaction before computing hash.
     - If doc is published and not soft-deleted, default operation is 'upsert'.
     - If doc is draft, unpublished, or soft-deleted, default operation is 'delete'.
     """
+    db.flush()
+    db.expire(doc, ["document_tags", "category"])
     content_hash = compute_doc_instance_hash(doc)
 
     # Determine next revision number monotonically
@@ -56,6 +59,7 @@ def record_revision_and_outbox_job(
         scheduled_at=scheduled_at or datetime.now(timezone.utc),
     )
     db.add(job)
+    db.flush()
     return revision, job
 
 
@@ -70,6 +74,7 @@ def emit_taxonomy_reindex_jobs(
     if not doc_ids:
         return []
 
+    db.flush()
     docs = db.query(Document).filter(
         Document.id.in_(doc_ids),
         Document.deleted_at.is_(None),
@@ -78,6 +83,7 @@ def emit_taxonomy_reindex_jobs(
     jobs = []
     now = datetime.now(timezone.utc)
     for doc in docs:
+        db.expire(doc, ["document_tags", "category"])
         content_hash = compute_doc_instance_hash(doc)
         op = "upsert" if doc.status == "published" else "delete"
         job = IndexJob(
@@ -91,4 +97,5 @@ def emit_taxonomy_reindex_jobs(
         )
         db.add(job)
         jobs.append(job)
+    db.flush()
     return jobs

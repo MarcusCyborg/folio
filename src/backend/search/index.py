@@ -10,9 +10,12 @@ Maintains:
 - Atomic disk serialization and deserialization
 """
 
+import hashlib
 import json
 import os
 import shutil
+import time
+import uuid
 from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -77,6 +80,8 @@ class InvertedIndex:
         self.total_docs: int = 0
         self.total_tokens: int = 0
         self.avg_doc_len: float = 0.0
+        self.index_version: str = ""
+        self.checksum: str = ""
 
     def _recalculate_corpus_stats(self):
         """Updates corpus-level metrics (N, total_tokens, avgdl)."""
@@ -86,6 +91,7 @@ class InvertedIndex:
             self.avg_doc_len = self.total_tokens / self.total_docs
         else:
             self.avg_doc_len = 0.0
+        self.index_version = f"mem-{uuid.uuid4().hex[:12]}"
 
     def upsert_document(
         self,
@@ -188,19 +194,13 @@ class InvertedIndex:
         """
         Atomically saves the inverted index, posting lists, document metadata,
         and corpus statistics to the target postings directory.
+        Write order guarantees readers never observe half-written state:
+        1. doc_entries.json (via unique temp file + atomic replace)
+        2. postings.json (via unique temp file + atomic replace)
+        3. index_stats.json (commit/version marker written last via unique temp file + atomic replace)
         """
         storage_dir = Path(storage_dir)
         storage_dir.mkdir(parents=True, exist_ok=True)
-
-        stats = {
-            "generation_id": self.generation_id,
-            "analyzer_version": self.analyzer_version,
-            "total_docs": self.total_docs,
-            "total_tokens": self.total_tokens,
-            "avg_doc_len": self.avg_doc_len,
-            "vocabulary_size": len(self.df),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
 
         doc_entries = {
             doc_id: {
@@ -214,33 +214,104 @@ class InvertedIndex:
             }
             for doc_id, m in self.documents.items()
         }
+        docs_bytes = json.dumps(doc_entries, indent=2, sort_keys=True).encode("utf-8")
+        docs_sha256 = hashlib.sha256(docs_bytes).hexdigest()
 
-        # Write stats
-        stats_tmp = storage_dir / "index_stats.json.tmp"
-        with open(stats_tmp, "w", encoding="utf-8") as f:
-            json.dump(stats, f, indent=2)
-        stats_tmp.replace(storage_dir / "index_stats.json")
+        postings_payload = {
+            "postings": self.postings,
+            "df": self.df,
+        }
+        postings_bytes = json.dumps(postings_payload, sort_keys=True).encode("utf-8")
+        postings_sha256 = hashlib.sha256(postings_bytes).hexdigest()
 
-        # Write doc metadata
-        docs_tmp = storage_dir / "doc_entries.json.tmp"
-        with open(docs_tmp, "w", encoding="utf-8") as f:
-            json.dump(doc_entries, f, indent=2)
-        docs_tmp.replace(storage_dir / "doc_entries.json")
+        checksum = hashlib.sha256(f"{docs_sha256}:{postings_sha256}".encode("utf-8")).hexdigest()
+        now_utc = datetime.now(timezone.utc)
+        index_version = f"{now_utc.strftime('%Y%m%d%H%M%S%f')}-{uuid.uuid4().hex[:8]}"
+        self.checksum = checksum
+        self.index_version = index_version
 
-        # Write postings and df
-        postings_tmp = storage_dir / "postings.json.tmp"
-        with open(postings_tmp, "w", encoding="utf-8") as f:
-            json.dump({
-                "postings": self.postings,
-                "df": self.df,
-            }, f)
-        postings_tmp.replace(storage_dir / "postings.json")
+        stats = {
+            "generation_id": self.generation_id,
+            "analyzer_version": self.analyzer_version,
+            "total_docs": self.total_docs,
+            "total_tokens": self.total_tokens,
+            "avg_doc_len": self.avg_doc_len,
+            "vocabulary_size": len(self.df),
+            "updated_at": now_utc.isoformat(),
+            "index_version": index_version,
+            "checksum": checksum,
+            "docs_sha256": docs_sha256,
+            "postings_sha256": postings_sha256,
+        }
+        stats_bytes = json.dumps(stats, indent=2, sort_keys=True).encode("utf-8")
+
+        tmp_suffix = f".{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
+
+        # 1. Write doc metadata first
+        docs_tmp = storage_dir / f".doc_entries.json{tmp_suffix}"
+        with open(docs_tmp, "wb") as f:
+            f.write(docs_bytes)
+            f.flush()
+        os.replace(docs_tmp, storage_dir / "doc_entries.json")
+
+        # 2. Write postings and df second
+        postings_tmp = storage_dir / f".postings.json{tmp_suffix}"
+        with open(postings_tmp, "wb") as f:
+            f.write(postings_bytes)
+            f.flush()
+        os.replace(postings_tmp, storage_dir / "postings.json")
+
+        # 3. Write stats / version marker last
+        stats_tmp = storage_dir / f".index_stats.json{tmp_suffix}"
+        with open(stats_tmp, "wb") as f:
+            f.write(stats_bytes)
+            f.flush()
+        os.replace(stats_tmp, storage_dir / "index_stats.json")
+
+    @classmethod
+    def read_disk_signature(cls, storage_dir: Path) -> Optional[Tuple[Any, ...]]:
+        """
+        Reads a lightweight version/checksum signature from index_stats.json
+        to detect cross-process or same-generation disk updates without loading full postings.
+        """
+        storage_dir = Path(storage_dir)
+        stats_file = storage_dir / "index_stats.json"
+        docs_file = storage_dir / "doc_entries.json"
+        postings_file = storage_dir / "postings.json"
+
+        if not stats_file.exists() or not docs_file.exists() or not postings_file.exists():
+            return None
+
+        for _ in range(3):
+            try:
+                st = stats_file.stat()
+                docs_st = docs_file.stat()
+                postings_st = postings_file.stat()
+                with open(stats_file, "r", encoding="utf-8") as f:
+                    stats = json.load(f)
+                return (
+                    stats.get("generation_id", ""),
+                    stats.get("index_version", ""),
+                    stats.get("checksum", ""),
+                    stats.get("total_docs", 0),
+                    stats.get("total_tokens", 0),
+                    stats.get("updated_at", ""),
+                    st.st_mtime_ns,
+                    st.st_size,
+                    docs_st.st_mtime_ns,
+                    docs_st.st_size,
+                    postings_st.st_mtime_ns,
+                    postings_st.st_size,
+                )
+            except Exception:
+                time.sleep(0.005)
+        return None
 
     @classmethod
     def load(cls, storage_dir: Path, expected_generation_id: Optional[str] = None) -> "InvertedIndex":
         """
         Loads an InvertedIndex from disk.
-        Validates presence of files and generation consistency.
+        Validates presence of files, generation consistency, and cross-file checksum integrity.
         """
         storage_dir = Path(storage_dir)
         stats_file = storage_dir / "index_stats.json"
@@ -250,8 +321,42 @@ class InvertedIndex:
         if not stats_file.exists() or not docs_file.exists() or not postings_file.exists():
             raise FileNotFoundError(f"Missing required index files in {storage_dir}")
 
-        with open(stats_file, "r", encoding="utf-8") as f:
-            stats = json.load(f)
+        stats: Dict[str, Any] = {}
+        doc_entries: Dict[str, Any] = {}
+        postings_data: Dict[str, Any] = {}
+
+        last_err: Optional[Exception] = None
+        for attempt in range(4):
+            try:
+                stats_bytes = stats_file.read_bytes()
+                docs_bytes = docs_file.read_bytes()
+                postings_bytes = postings_file.read_bytes()
+
+                stats = json.loads(stats_bytes.decode("utf-8"))
+                expected_docs_sha = stats.get("docs_sha256")
+                expected_postings_sha = stats.get("postings_sha256")
+
+                if expected_docs_sha:
+                    actual_docs_sha = hashlib.sha256(docs_bytes).hexdigest()
+                    if actual_docs_sha != expected_docs_sha:
+                        raise GenerationMismatchError("Transient or corrupt doc_entries.json checksum mismatch")
+
+                if expected_postings_sha:
+                    actual_postings_sha = hashlib.sha256(postings_bytes).hexdigest()
+                    if actual_postings_sha != expected_postings_sha:
+                        raise GenerationMismatchError("Transient or corrupt postings.json checksum mismatch")
+
+                doc_entries = json.loads(docs_bytes.decode("utf-8"))
+                postings_data = json.loads(postings_bytes.decode("utf-8"))
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                if attempt < 3:
+                    time.sleep(0.005)
+
+        if last_err is not None:
+            raise last_err
 
         gen_id = stats.get("generation_id", "")
         if expected_generation_id and gen_id != expected_generation_id:
@@ -259,17 +364,13 @@ class InvertedIndex:
                 f"Generation mismatch: index contains {gen_id}, expected {expected_generation_id}"
             )
 
-        with open(docs_file, "r", encoding="utf-8") as f:
-            doc_entries = json.load(f)
-
-        with open(postings_file, "r", encoding="utf-8") as f:
-            postings_data = json.load(f)
-
         index = cls(generation_id=gen_id)
         index.analyzer_version = stats.get("analyzer_version", ANALYZER_VERSION)
         index.total_docs = stats.get("total_docs", 0)
         index.total_tokens = stats.get("total_tokens", 0)
         index.avg_doc_len = stats.get("avg_doc_len", 0.0)
+        index.index_version = stats.get("index_version", "")
+        index.checksum = stats.get("checksum", "")
 
         # Reconstruct doc metadata
         for doc_id, d in doc_entries.items():

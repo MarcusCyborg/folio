@@ -118,6 +118,8 @@ class IndexWorker:
             # If doc exists in DB, compare its current hash with job.revision_hash.
             # If they don't match, this job is stale (a newer revision already exists).
             if doc:
+                db.refresh(doc)
+                db.expire(doc, ["document_tags", "category"])
                 current_hash = compute_doc_instance_hash(doc)
                 if job.revision_hash != current_hash:
                     # Newer revision supercedes this job: mark completed safely without applying stale state
@@ -139,17 +141,6 @@ class IndexWorker:
             if job.operation == "upsert" and doc and doc.status == "published" and doc.deleted_at is None:
                 tag_slugs = [dt.tag.slug for dt in doc.document_tags if dt.tag] if doc.document_tags else []
                 category_slug = doc.category.slug if doc.category else ""
-                storage.upsert_document(
-                    doc.id,
-                    {
-                        "title": doc.title,
-                        "summary": doc.summary,
-                        "category_slug": category_slug,
-                        "tags": tag_slugs,
-                        "revision_hash": job.revision_hash,
-                        "updated_at": (doc.updated_at or now).isoformat(),
-                    },
-                )
                 if (storage.postings_dir / "index_stats.json").exists():
                     from src.backend.search.index import InvertedIndex
                     inv_idx = InvertedIndex.load(storage.postings_dir)
@@ -165,14 +156,25 @@ class IndexWorker:
                         status="published",
                     )
                     inv_idx.save(storage.postings_dir)
+                storage.upsert_document(
+                    doc.id,
+                    {
+                        "title": doc.title,
+                        "summary": doc.summary,
+                        "category_slug": category_slug,
+                        "tags": tag_slugs,
+                        "revision_hash": job.revision_hash,
+                        "updated_at": (doc.updated_at or now).isoformat(),
+                    },
+                )
             else:
                 # Delete operation, draft status, or soft-deleted doc
-                storage.delete_document(job.document_id)
                 if (storage.postings_dir / "index_stats.json").exists():
                     from src.backend.search.index import InvertedIndex
                     inv_idx = InvertedIndex.load(storage.postings_dir)
                     inv_idx.delete_document(job.document_id)
                     inv_idx.save(storage.postings_dir)
+                storage.delete_document(job.document_id)
 
             # Mark completed
             job.state = "completed"
