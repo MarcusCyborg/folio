@@ -6,6 +6,16 @@ import { getSession } from '../core/session.js';
 import { notify, confirmAction, renderError } from '../core/ui.js';
 import { navigate } from '../core/router.js';
 import { attachMentionsAutocomplete } from './mentions.js';
+import {
+  prefetchedDocCache,
+  clickedDocHint,
+  claimPrefetchedDocument,
+} from './library_view.js';
+import {
+  prefersReducedMotion,
+  setSharedTitle,
+  safeScrollIntoView,
+} from '../core/motion.js';
 
 function genUuid() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -28,58 +38,134 @@ function getSafeHttpUrl(url) {
 }
 
 export async function renderDocumentDetail(container, routeContext) {
-  const { params, query, signal } = routeContext;
+  const { params, query, signal, navId, isStale } = routeContext;
   const docId = params.id;
   const searchEventId = query.get('search_event_id');
   const session = getSession();
 
   let cleanupMentions = null;
+  let cleanupReadingProgress = null;
+  let cleanedUp = false;
+  let viewLogged = false;
   let prevMetaDesc = '';
   let metaDescEl = document.querySelector('meta[name="description"]');
   if (metaDescEl) {
     prevMetaDesc = metaDescEl.getAttribute('content') || '';
   }
 
-  container.innerHTML = `
-    <div class="public-page" style="padding-top: 1rem;">
+  function detailCleanup() {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    if (cleanupReadingProgress) {
+      cleanupReadingProgress();
+      cleanupReadingProgress = null;
+    }
+    if (cleanupMentions) {
+      cleanupMentions();
+      cleanupMentions = null;
+    }
+    if (metaDescEl && prevMetaDesc) {
+      metaDescEl.setAttribute('content', prevMetaDesc);
+    }
+  }
+
+  if (typeof routeContext.registerCleanup === 'function') {
+    routeContext.registerCleanup(detailCleanup);
+  }
+
+  // Create isolated root element for this render to prevent stale async renders from mutating newer routes
+  const detailPageRoot = document.createElement('div');
+  detailPageRoot.className = 'public-page detail-page-container';
+  detailPageRoot.style.paddingTop = '1rem';
+  detailPageRoot.setAttribute('data-doc-id', docId);
+
+  // Synchronous shell mount (Phase B & C):
+  // Check if we have a title hint from a clicked card link for shared-element title transition
+  const hasMatchingHint = Boolean(
+    clickedDocHint &&
+    clickedDocHint.id === docId &&
+    (Date.now() - clickedDocHint.timestamp < 10000)
+  );
+  const initialTitle = hasMatchingHint ? clickedDocHint.title : '';
+
+  function renderLoadingShell() {
+    detailPageRoot.innerHTML = `
       <a href="#/library" class="back-link" id="detailBackLink">← Back to Library Catalog</a>
+      ${initialTitle ? `
+        <div class="detail-header-wrapper" id="detailHeaderWrapper">
+          <h1 class="detail-title" id="detailInitialTitle" style="${hasMatchingHint && !prefersReducedMotion() ? 'view-transition-name: folio-doc-title;' : ''}">${escapeText(initialTitle)}</h1>
+        </div>
+      ` : ''}
       <div id="detailLoading" style="text-align: center; padding: 4rem;">
-        <span class="spinner"></span>
+        <span class="spinner" aria-label="Loading document..."></span>
         <p style="color: var(--color-muted); margin-top: 1rem;">Loading document...</p>
       </div>
       <div id="detailContent" style="display: none;"></div>
-    </div>
-  `;
+    `;
+  }
 
-  try {
-    // Fetch document detail and public settings concurrently
-    const [doc, publicSettings] = await Promise.all([
-      api(`/documents/${docId}`, { signal }),
-      api('/settings/public', { signal }).catch(() => ({ comments_enabled: true })),
-    ]);
+  renderLoadingShell();
+  container.appendChild(detailPageRoot);
 
-    const contentEl = container.querySelector('#detailContent');
-    const loadingEl = container.querySelector('#detailLoading');
-    if (loadingEl) loadingEl.style.display = 'none';
-    if (!contentEl) return;
-    contentEl.style.display = 'block';
-
-    // Update document title and meta description for reading view (using SEO title when present)
-    const siteTitle = publicSettings.site_name || 'Folio';
-    document.title = `${doc.seo_title || doc.title} — ${siteTitle}`;
-    if (!metaDescEl) {
-      metaDescEl = document.createElement('meta');
-      metaDescEl.setAttribute('name', 'description');
-      document.head.appendChild(metaDescEl);
+  if (hasMatchingHint && !prefersReducedMotion()) {
+    const initialTitleEl = detailPageRoot.querySelector('#detailInitialTitle');
+    if (initialTitleEl) {
+      setSharedTitle(initialTitleEl, docId);
     }
-    metaDescEl.setAttribute('content', doc.seo_description || doc.summary || 'Folio Research Library document');
+  }
 
-    // 1. Record View Event (Idempotent per navigation)
-    const navigationId = genUuid();
-    api(`/documents/${doc.id}/views`, {
-      method: 'POST',
-      body: { navigation_id: navigationId },
-    }).catch((err) => console.warn('View logging error (non-fatal):', err));
+  // Background async data fetching (Phase B & Finding C: outside of View Transitions callback)
+  async function loadDetailContent() {
+    try {
+      const claimedPromise = claimPrefetchedDocument(docId, signal);
+      const docPromise = claimedPromise || api(`/documents/${docId}`, { signal });
+      docPromise.catch(() => {});
+
+      const [doc, publicSettings] = await Promise.all([
+        docPromise,
+        api('/settings/public', { signal }).catch(() => ({ comments_enabled: true })),
+      ]);
+
+      // STRICT OWNERSHIP VERIFICATION (Phase A & Finding C):
+      // If navigation was aborted, superseded by a newer navigation, or container detached, halt immediately!
+      if (cleanedUp || signal.aborted || (isStale && isStale()) || !detailPageRoot.isConnected) {
+        return;
+      }
+      if (!doc || typeof doc !== 'object' || !doc.id) {
+        throw new Error('Invalid document response');
+      }
+
+      const contentEl = detailPageRoot.querySelector('#detailContent');
+      const loadingEl = detailPageRoot.querySelector('#detailLoading');
+      const initialHeader = detailPageRoot.querySelector('#detailHeaderWrapper');
+      const initialTitleEl = detailPageRoot.querySelector('#detailInitialTitle');
+      const hadActiveSharedTitle = Boolean(
+        initialTitleEl && initialTitleEl.style.viewTransitionName === 'folio-doc-title'
+      );
+      if (initialHeader) initialHeader.remove();
+      if (loadingEl) loadingEl.style.display = 'none';
+      if (!contentEl) return;
+      contentEl.style.display = 'block';
+
+      // Update document title and meta description for reading view (using SEO title when present)
+      const siteTitle = publicSettings.site_name || 'Folio';
+      document.title = `${doc.seo_title || doc.title} — ${siteTitle}`;
+      if (!metaDescEl) {
+        metaDescEl = document.createElement('meta');
+        metaDescEl.setAttribute('name', 'description');
+        document.head.appendChild(metaDescEl);
+      }
+      metaDescEl.setAttribute('content', doc.seo_description || doc.summary || 'Folio Research Library document');
+
+      // 1. Record View Event (Strictly once per completed navigation)
+      if (!viewLogged) {
+        viewLogged = true;
+        const navigationId = genUuid();
+        api(`/documents/${doc.id}/views`, {
+          method: 'POST',
+          body: { navigation_id: navigationId },
+        }).catch((err) => console.warn('View logging error (non-fatal):', err));
+      }
 
     const addedDate = new Date(doc.created_at).toLocaleDateString('en-US', {
       year: 'numeric',
@@ -128,7 +214,7 @@ export async function renderDocumentDetail(container, routeContext) {
                 <span>${doc.views_count} views</span>
               </span>
               <button id="likeBtn" class="like-btn ${doc.liked_by_me ? 'liked' : ''}" aria-label="${doc.liked_by_me ? 'Unlike document' : 'Like document'}" aria-pressed="${doc.liked_by_me ? 'true' : 'false'}">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="${doc.liked_by_me ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                <svg class="heart-icon" width="15" height="15" viewBox="0 0 24 24" fill="${doc.liked_by_me ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
                 <span id="likeCountText">${doc.likes_count}</span>
               </button>
             </div>
@@ -151,7 +237,7 @@ export async function renderDocumentDetail(container, routeContext) {
           </div>
         </header>
 
-        <!-- Sanitized Rendered Content Body (allowlisted server-side) -->
+        <!-- Sanitized Rendered Content Body -->
         <main class="document-reading-column markdown-body">
           ${doc.rendered_content}
         </main>
@@ -178,7 +264,7 @@ export async function renderDocumentDetail(container, routeContext) {
       <section class="comments-section" aria-label="Comments and Discussion">
         <h3 class="comments-title">Discussion & Peer Notes (<span id="commentsCountHeader">${doc.comments_count}</span>)</h3>
 
-        <!-- Status Warnings: Disabled Comments or User Suspension -->
+        <!-- Status Warnings -->
         ${!publicSettings.comments_enabled ? `
           <div class="notice notice-warning" style="margin-bottom: 1.5rem;">
             <strong>Discussions Closed:</strong> Commenting is currently disabled library-wide by administrators. Existing notes remain readable.
@@ -223,7 +309,13 @@ export async function renderDocumentDetail(container, routeContext) {
       <div id="reportModalContainer"></div>
     `;
 
-    // Generate Table of Contents from headings (D5)
+    // Setup shared title reference for active transition and back navigation
+    const detailTitleEl = contentEl.querySelector('.detail-title');
+    if (detailTitleEl && hadActiveSharedTitle && !prefersReducedMotion()) {
+      setSharedTitle(detailTitleEl, doc.id);
+    }
+
+    // Generate Table of Contents from headings
     const readingColumn = contentEl.querySelector('.document-reading-column');
     if (readingColumn) {
       const headings = readingColumn.querySelectorAll('h1, h2, h3');
@@ -264,24 +356,116 @@ export async function renderDocumentDetail(container, routeContext) {
         `;
         readingColumn.parentNode.insertBefore(tocBox, readingColumn);
 
+        // Smooth scroll and flash arrival highlight
         tocBox.querySelectorAll('a').forEach((link) => {
           link.addEventListener('click', (e) => {
             e.preventDefault();
             const targetId = link.getAttribute('href').slice(1);
             const targetEl = document.getElementById(targetId);
             if (targetEl) {
-              targetEl.scrollIntoView({ behavior: 'smooth' });
+              safeScrollIntoView(targetEl, { behavior: 'smooth', block: 'start' });
+              targetEl.setAttribute('tabindex', '-1');
+              targetEl.focus({ preventScroll: true });
+
+              const triggerFlash = () => {
+                targetEl.classList.remove('heading-target-flash');
+                void targetEl.offsetWidth;
+                targetEl.classList.add('heading-target-flash');
+                setTimeout(() => {
+                  targetEl.classList.remove('heading-target-flash');
+                }, 800);
+              };
+
+              // Trigger highlight arrival flash when arriving at target heading
+              if ('onscrollend' in window) {
+                window.addEventListener('scrollend', triggerFlash, { once: true });
+              } else {
+                const observer = new IntersectionObserver((entries) => {
+                  if (entries[0] && entries[0].isIntersecting) {
+                    observer.disconnect();
+                    triggerFlash();
+                  }
+                }, { threshold: 0.3 });
+                observer.observe(targetEl);
+                setTimeout(() => {
+                  observer.disconnect();
+                  triggerFlash();
+                }, 600);
+              }
             }
           });
         });
       }
+
+      // Reading Progress Bar at top of viewport
+      let progressBar = document.getElementById('readingProgressBar');
+      if (!progressBar) {
+        progressBar = document.createElement('div');
+        progressBar.id = 'readingProgressBar';
+        progressBar.className = 'reading-progress-bar';
+        progressBar.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(progressBar);
+      }
+
+      let progressRaf = null;
+      function updateReadingProgress() {
+        if (!readingColumn || !progressBar) return;
+        const rect = readingColumn.getBoundingClientRect();
+        const columnTop = window.scrollY + rect.top;
+        const columnHeight = rect.height;
+        const viewportHeight = window.innerHeight;
+        const headerOffset = 68;
+
+        if (columnHeight <= viewportHeight) {
+          progressBar.style.transform = 'scaleX(0)';
+          return;
+        }
+
+        const scrollableDist = columnHeight - viewportHeight + headerOffset;
+        const currentScroll = window.scrollY + headerOffset - columnTop;
+        const progress = Math.min(1, Math.max(0, currentScroll / scrollableDist));
+        progressBar.style.transform = `scaleX(${progress})`;
+      }
+
+      const onProgressScroll = () => {
+        if (progressRaf) cancelAnimationFrame(progressRaf);
+        progressRaf = requestAnimationFrame(updateReadingProgress);
+      };
+
+      window.addEventListener('scroll', onProgressScroll, { passive: true });
+      window.addEventListener('resize', onProgressScroll, { passive: true });
+      let readingRo = null;
+      if (typeof ResizeObserver !== 'undefined') {
+        readingRo = new ResizeObserver(onProgressScroll);
+        readingRo.observe(readingColumn);
+      }
+      updateReadingProgress();
+
+      cleanupReadingProgress = () => {
+        if (progressRaf) cancelAnimationFrame(progressRaf);
+        window.removeEventListener('scroll', onProgressScroll);
+        window.removeEventListener('resize', onProgressScroll);
+        if (readingRo) readingRo.disconnect();
+        if (progressBar && progressBar.parentNode) {
+          progressBar.parentNode.removeChild(progressBar);
+        }
+      };
     }
 
-    // Hook up Back to Library link to preserve previous search state if available in history
-    const backLink = container.querySelector('#detailBackLink');
+    // Hook up Back to Library link
+    const backLink = detailPageRoot.querySelector('#detailBackLink');
     if (backLink) {
       backLink.onclick = (e) => {
-        if (window.history.length > 1) {
+        if (detailTitleEl) {
+          setSharedTitle(detailTitleEl, doc.id);
+        }
+        try {
+          const state = window.history.state || {};
+          window.history.replaceState({ ...state, folioDocId: doc.id }, '');
+          sessionStorage.setItem('folio_last_doc_id', doc.id);
+        } catch (_) {}
+
+        if (window.history.length > 1 && (window.history.state?.folioScroll !== undefined || sessionStorage.getItem('folio_library_scroll') !== null)) {
           e.preventDefault();
           window.history.back();
         }
@@ -317,8 +501,20 @@ export async function renderDocumentDetail(container, routeContext) {
           likeBtn.classList.toggle('liked', isLiked);
           likeBtn.setAttribute('aria-pressed', isLiked ? 'true' : 'false');
           likeBtn.setAttribute('aria-label', isLiked ? 'Unlike document' : 'Like document');
-          likeBtn.querySelector('.heart-icon').textContent = isLiked ? '♥' : '♡';
+
+          const heartSvg = likeBtn.querySelector('.heart-icon');
+          if (heartSvg) {
+            heartSvg.setAttribute('fill', isLiked ? 'currentColor' : 'none');
+          }
           likeCountText.textContent = likesCount;
+
+          if (isLiked && !prefersReducedMotion()) {
+            likeBtn.classList.remove('like-pop');
+            void likeBtn.offsetWidth;
+            likeBtn.classList.add('like-pop');
+            setTimeout(() => likeBtn.classList.remove('like-pop'), 250);
+          }
+
           notify(isLiked ? 'Added to your favorites' : 'Removed from favorites', { kind: 'success' });
         } catch (err) {
           notify(err.message || 'Failed to update like status', { kind: 'error' });
@@ -336,7 +532,7 @@ export async function renderDocumentDetail(container, routeContext) {
       cleanupMentions = attachMentionsAutocomplete(mainCommentInput, mentionsWrapper);
     }
 
-    // State for comments pagination
+    // Fetch and render initial comments asynchronously (does not block reading view)
     let commentPage = 1;
     const commentPageSize = 10;
 
@@ -354,6 +550,8 @@ export async function renderDocumentDetail(container, routeContext) {
           query: { page: commentPage, page_size: commentPageSize },
           signal,
         });
+
+        if (signal.aborted || !detailPageRoot.isConnected) return;
 
         if (countHeader) countHeader.textContent = data.total;
 
@@ -404,7 +602,6 @@ export async function renderDocumentDetail(container, routeContext) {
             ${mentionsHtml ? `<div class="comment-mentions-bar">Mentioned: ${mentionsHtml}</div>` : ''}
           `;
 
-          // Inline Owner Edit
           const editBtn = itemEl.querySelector('.edit-comment-btn');
           if (editBtn) {
             editBtn.onclick = () => {
@@ -412,233 +609,209 @@ export async function renderDocumentDetail(container, routeContext) {
             };
           }
 
-          // Owner Delete with modal confirmation
           const delBtn = itemEl.querySelector('.delete-comment-btn');
           if (delBtn) {
             delBtn.onclick = async () => {
-              const confirmed = await confirmAction({
-                title: 'Delete Research Note',
-                message: 'Are you sure you want to delete this note? This action cannot be undone.',
-                confirmLabel: 'Delete Note',
-                destructive: true,
-              });
-              if (confirmed) {
-                try {
-                  await api(`/comments/${c.id}`, { method: 'DELETE' });
-                  notify('Note deleted.', { kind: 'success' });
-                  await fetchAndRenderComments(commentPage);
-                } catch (delErr) {
-                  notify(delErr.message || 'Failed to delete comment', { kind: 'error' });
-                }
+              const ok = await confirmAction('Are you sure you want to delete this research note?');
+              if (!ok) return;
+              try {
+                await api(`/comments/${c.id}`, { method: 'DELETE' });
+                notify('Comment removed.', { kind: 'success' });
+                fetchAndRenderComments(commentPage);
+              } catch (err) {
+                notify(err.message || 'Failed to delete comment', { kind: 'error' });
               }
             };
           }
 
-          // Report Comment Modal
-          const reportBtn = itemEl.querySelector('.report-comment-btn');
-          if (reportBtn) {
-            reportBtn.onclick = () => {
-              const currentSess = getSession();
-              if (!currentSess.user) {
-                notify('Please sign in to report notes.', { kind: 'info' });
-                navigate(`/login?next=/documents/${doc.id}`);
-                return;
+          const repBtn = itemEl.querySelector('.report-comment-btn');
+          if (repBtn) {
+            repBtn.onclick = () => {
+              const modalHost = contentEl.querySelector('#reportModalContainer');
+              if (modalHost) {
+                openReportDialog(modalHost, c.id);
               }
-              openReportModal(contentEl.querySelector('#reportModalContainer'), c.id);
             };
           }
 
           feed.appendChild(itemEl);
         });
 
-        // Render Comments Pagination if multiple pages exist
+        // Comments pagination
         if (paginationContainer) {
-          const totalPages = data.total_pages || Math.ceil(data.total / commentPageSize);
+          const totalPages = Math.ceil(data.total / commentPageSize);
           if (totalPages > 1) {
             paginationContainer.innerHTML = `
-              <div class="pagination" aria-label="Comments Pagination">
-                <button class="page-btn" id="prevCommentsBtn" ${commentPage <= 1 ? 'disabled' : ''}>← Previous</button>
-                <span class="page-info">Page ${commentPage} of ${totalPages} (${data.total} notes)</span>
-                <button class="page-btn" id="nextCommentsBtn" ${commentPage >= totalPages ? 'disabled' : ''}>Next →</button>
+              <div class="pagination">
+                <button class="btn btn-secondary btn-sm prev-page" ${commentPage <= 1 ? 'disabled' : ''}>← Previous</button>
+                <span class="pagination-info">Page ${commentPage} of ${totalPages}</span>
+                <button class="btn btn-secondary btn-sm next-page" ${commentPage >= totalPages ? 'disabled' : ''}>Next →</button>
               </div>
             `;
-            const prevBtn = paginationContainer.querySelector('#prevCommentsBtn');
-            const nextBtn = paginationContainer.querySelector('#nextCommentsBtn');
-            if (prevBtn) prevBtn.onclick = () => fetchAndRenderComments(commentPage - 1);
-            if (nextBtn) nextBtn.onclick = () => fetchAndRenderComments(commentPage + 1);
+            const prev = paginationContainer.querySelector('.prev-page');
+            const next = paginationContainer.querySelector('.next-page');
+            if (prev) prev.onclick = () => fetchAndRenderComments(commentPage - 1);
+            if (next) next.onclick = () => fetchAndRenderComments(commentPage + 1);
           } else {
             paginationContainer.innerHTML = '';
           }
         }
-
-      } catch (commentsErr) {
-        if (commentsErr.name === 'AbortError') return;
+      } catch (err) {
+        if (signal.aborted || !detailPageRoot.isConnected) return;
         feed.innerHTML = `
-          <div class="notice notice-error" style="margin: 1rem 0;">
-            <p>Failed to load discussions: ${escapeText(commentsErr.message || 'Network error')}</p>
-            <button class="btn btn-secondary btn-sm" id="retryCommentsBtn">Retry</button>
+          <div class="notice notice-error">
+            Failed to load peer notes: ${escapeText(err.message)}
           </div>
         `;
-        const retryBtn = feed.querySelector('#retryCommentsBtn');
-        if (retryBtn) retryBtn.onclick = () => fetchAndRenderComments(commentPage);
       }
     }
 
-    // Load initial comments page
-    await fetchAndRenderComments(1);
-
-    // Comment submission handler
-    const submitBtn = contentEl.querySelector('#submitCommentBtn');
-    const commentInput = contentEl.querySelector('#commentBodyInput');
+    // Submit new comment note
+    const submitCommentBtn = contentEl.querySelector('#submitCommentBtn');
+    const commentBodyInput = contentEl.querySelector('#commentBodyInput');
     const composeError = contentEl.querySelector('#composeError');
 
-    if (submitBtn && commentInput) {
-      submitBtn.onclick = async () => {
-        const bodyText = commentInput.value.trim();
-        if (!bodyText) {
+    if (submitCommentBtn && commentBodyInput) {
+      submitCommentBtn.onclick = async () => {
+        const text = commentBodyInput.value.trim();
+        if (!text) {
           if (composeError) {
-            composeError.textContent = 'Please enter note content before posting.';
+            composeError.textContent = 'Note content cannot be empty.';
             composeError.style.display = 'inline-block';
           }
           return;
         }
 
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Posting...';
+        submitCommentBtn.disabled = true;
         if (composeError) composeError.style.display = 'none';
 
         try {
           await api(`/documents/${doc.id}/comments`, {
             method: 'POST',
-            body: { body: bodyText },
+            body: { body: text },
           });
-          commentInput.value = '';
-          notify('Research note posted successfully.', { kind: 'success' });
-          await fetchAndRenderComments(1);
-        } catch (postErr) {
+          commentBodyInput.value = '';
+          notify('Note published.', { kind: 'success' });
+          fetchAndRenderComments(1);
+        } catch (err) {
           if (composeError) {
+            composeError.textContent = err.message || 'Failed to publish comment.';
             composeError.style.display = 'inline-block';
-            composeError.textContent = postErr.message || 'Failed to submit comment.';
-          } else {
-            notify(postErr.message || 'Failed to submit comment.', { kind: 'error' });
           }
         } finally {
-          submitBtn.disabled = false;
-          submitBtn.textContent = 'Post Note';
+          submitCommentBtn.disabled = false;
         }
       };
     }
 
-  } catch (err) {
-    if (err.name === 'AbortError') return;
-    renderError(container, err, {
-      onRetry: () => renderDocumentDetail(container, routeContext),
-    });
-  }
+    fetchAndRenderComments(1);
 
-  // Cleanup handler called when route changes
-  return function routeCleanup() {
-    if (cleanupMentions) {
-      cleanupMentions();
-    }
-    // Reset document title
-    document.title = 'Folio — Knowledge & Research Library';
-    // Restore or reset meta description
-    if (metaDescEl) {
-      if (prevMetaDesc) {
-        metaDescEl.setAttribute('content', prevMetaDesc);
-      } else {
-        metaDescEl.remove();
+    } catch (err) {
+      if (cleanedUp || signal.aborted || (isStale && isStale()) || !detailPageRoot.isConnected) return;
+      if (err && err.name === 'AbortError') return;
+      console.error('Document detail fetch error:', err);
+      detailPageRoot.innerHTML = `
+        <a href="#/library" class="back-link">← Back to Library Catalog</a>
+        <div class="notice notice-error" style="margin: 2rem auto; max-width: 600px;">
+          <h3>Could not load research document</h3>
+          <p>${escapeText(err.message || 'The requested document could not be retrieved.')}</p>
+          <button type="button" class="btn btn-secondary" id="detailRetryBtn">Retry</button>
+        </div>
+      `;
+      const retryBtn = detailPageRoot.querySelector('#detailRetryBtn');
+      if (retryBtn) {
+        retryBtn.onclick = () => {
+          if (cleanedUp || signal.aborted || (isStale && isStale()) || !detailPageRoot.isConnected) return;
+          renderLoadingShell();
+          loadDetailContent();
+        };
       }
     }
-  };
+  }
+
+  await loadDetailContent();
+
+  // Cleanup handler called when navigating AWAY from this document detail
+  return detailCleanup;
 }
 
-// Inline comment editing component with accessible @mentions
-function openInlineCommentEditor(commentCardEl, comment, docId, onRefresh) {
-  const bodyContainer = commentCardEl.querySelector('.comment-body-container');
-  const actionsContainer = commentCardEl.querySelector('.comment-actions');
+function openInlineCommentEditor(itemEl, comment, docId, onSaved) {
+  const bodyContainer = itemEl.querySelector('.comment-body-container');
+  const actionsBar = itemEl.querySelector('.comment-actions');
   if (!bodyContainer) return;
 
   const originalHtml = bodyContainer.innerHTML;
-  if (actionsContainer) actionsContainer.style.display = 'none';
+  if (actionsBar) actionsBar.style.display = 'none';
 
   bodyContainer.innerHTML = `
-    <div class="inline-comment-editor">
-      <div class="edit-textarea-wrapper" style="position: relative;">
-        <textarea class="textarea edit-body-textarea" rows="3">${escapeText(comment.body)}</textarea>
+    <div class="inline-comment-edit-box">
+      <div class="textarea-mentions-wrapper" style="position: relative;">
+        <textarea class="textarea edit-textarea" rows="3">${escapeText(comment.body)}</textarea>
       </div>
-      <div class="edit-error-text notice notice-error" style="display: none; margin-top: 0.5rem; font-size: 0.85rem;"></div>
-      <div class="inline-edit-actions">
+      <div class="inline-edit-actions" style="margin-top: 0.5rem; display: flex; gap: 0.5rem;">
+        <button class="btn btn-primary btn-sm save-edit-btn">Save</button>
         <button class="btn btn-secondary btn-sm cancel-edit-btn">Cancel</button>
-        <button class="btn btn-primary btn-sm save-edit-btn">Save Changes</button>
+        <span class="inline-edit-error" style="color: var(--color-danger); font-size: 0.85rem; display: none;"></span>
       </div>
     </div>
   `;
 
-  const textarea = bodyContainer.querySelector('.edit-body-textarea');
-  const wrapper = bodyContainer.querySelector('.edit-textarea-wrapper');
-  const cancelBtn = bodyContainer.querySelector('.cancel-edit-btn');
+  const editInput = bodyContainer.querySelector('.edit-textarea');
+  const mentionsWrapper = bodyContainer.querySelector('.textarea-mentions-wrapper');
   const saveBtn = bodyContainer.querySelector('.save-edit-btn');
-  const errorEl = bodyContainer.querySelector('.edit-error-text');
+  const cancelBtn = bodyContainer.querySelector('.cancel-edit-btn');
+  const errorEl = bodyContainer.querySelector('.inline-edit-error');
 
-  const cleanupEditorMentions = attachMentionsAutocomplete(textarea, wrapper);
-  textarea.focus();
+  const mentionsCleanup = attachMentionsAutocomplete(editInput, mentionsWrapper);
 
   cancelBtn.onclick = () => {
-    cleanupEditorMentions();
+    if (mentionsCleanup) mentionsCleanup();
     bodyContainer.innerHTML = originalHtml;
-    if (actionsContainer) actionsContainer.style.display = 'flex';
+    if (actionsBar) actionsBar.style.display = 'flex';
   };
 
   saveBtn.onclick = async () => {
-    const updatedText = textarea.value.trim();
-    if (!updatedText) {
-      errorEl.textContent = 'Note body cannot be empty.';
-      errorEl.style.display = 'block';
+    const newText = editInput.value.trim();
+    if (!newText) {
+      errorEl.textContent = 'Note cannot be blank.';
+      errorEl.style.display = 'inline-block';
       return;
     }
-
     saveBtn.disabled = true;
-    saveBtn.textContent = 'Saving...';
     errorEl.style.display = 'none';
 
     try {
       await api(`/comments/${comment.id}`, {
         method: 'PATCH',
-        body: { body: updatedText },
+        body: { body: newText },
       });
-      cleanupEditorMentions();
-      notify('Note updated successfully.', { kind: 'success' });
-      onRefresh();
+      if (mentionsCleanup) mentionsCleanup();
+      notify('Note updated.', { kind: 'success' });
+      onSaved();
     } catch (err) {
       errorEl.textContent = err.message || 'Failed to update note.';
-      errorEl.style.display = 'block';
+      errorEl.style.display = 'inline-block';
       saveBtn.disabled = false;
-      saveBtn.textContent = 'Save Changes';
     }
   };
 }
 
-// Accessible Modal Dialog for reporting comments
-function openReportModal(containerEl, commentId) {
-  if (!containerEl) return;
-
+function openReportDialog(containerEl, commentId) {
   containerEl.innerHTML = `
     <div class="dialog-backdrop" id="reportDialogBackdrop">
-      <div class="dialog report-dialog" role="dialog" aria-modal="true" aria-labelledby="reportModalTitle">
-        <h3 id="reportModalTitle" style="margin-top: 0;">Report Research Note</h3>
-        <p style="color: var(--color-muted); font-size: 0.9rem; margin-bottom: 1rem;">
-          Help maintain scientific integrity by identifying research notes that violate publication or community guidelines.
+      <div class="dialog-modal" role="dialog" aria-labelledby="reportModalTitle" aria-modal="true">
+        <h3 id="reportModalTitle" class="dialog-title">Report Research Note</h3>
+        <p style="color: var(--color-muted); font-size: 0.875rem; margin-bottom: 1rem;">
+          Notify library moderators about notes containing harassment, spam, copyright infringement, or invalid research citations.
         </p>
-
         <form id="reportCommentForm">
           <div class="field">
-            <label class="label" for="reportReasonSelect">Reason for report</label>
+            <label class="label" for="reportReasonSelect">Reason</label>
             <select id="reportReasonSelect" class="select" required>
-              <option value="spam">Spam or Unsolicited Promotion</option>
-              <option value="abuse">Abusive, Harassing, or Defamatory</option>
-              <option value="other">Other Guideline Violation</option>
+              <option value="spam">Spam / Promotion</option>
+              <option value="harassment">Harassment / Abusive Language</option>
+              <option value="misinformation">Inaccurate / Misleading Attribution</option>
+              <option value="other">Other Violation</option>
             </select>
           </div>
 

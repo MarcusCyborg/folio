@@ -49,12 +49,31 @@
 }
 
 .category-list {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
 }
 
+.category-pill-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 32px;
+  background: #E8F1EF;
+  border: 1px solid #D1E5E1;
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  box-sizing: border-box;
+  transform-origin: 0 0;
+}
+
 .category-pill {
+  position: relative;
+  z-index: 1;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -69,18 +88,22 @@
   border-radius: var(--radius-sm);
   text-align: left;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color var(--duration-fast) var(--ease-folio);
 }
 
 .category-pill:hover {
-  background: var(--color-bg);
+  background: transparent;
   color: var(--color-accent);
 }
 
 .category-pill.active {
-  background: #E8F1EF;
   color: var(--color-accent);
   font-weight: 600;
+}
+
+/* Fallback when indicator element is not present */
+.category-list:not(.has-indicator) .category-pill.active {
+  background: #E8F1EF;
   border-color: #D1E5E1;
 }
 
@@ -138,6 +161,7 @@
 
 /* Active filter chips bar */
 .active-filters-bar {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -312,6 +336,29 @@
   font-size: 0.8rem;
   padding: 2px 8px;
   border-radius: var(--radius-sm);
+  will-change: transform, opacity;
+}
+
+.active-filter-chip.chip-entering {
+  animation: chipEnter var(--duration-fast) var(--ease-folio);
+}
+
+@keyframes chipEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.active-filter-chip.chip-removing {
+  opacity: 0;
+  transform: scale(0.85);
+  pointer-events: none;
+  user-select: none;
 }
 
 .chip-remove-btn {
@@ -357,6 +404,42 @@
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
+  transition: opacity var(--duration-state) var(--ease-folio);
+}
+
+.documents-list.is-updating {
+  opacity: 0.55 !important;
+}
+
+.documents-list-fade {
+  animation: listFadeIn var(--duration-state) var(--ease-folio);
+}
+
+@keyframes listFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.card-entrance {
+  animation: cardEntrance var(--duration-state) var(--ease-folio) both;
+  animation-delay: calc(var(--card-index, 0) * 30ms);
+}
+
+@keyframes cardEntrance {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .document-card-row {
@@ -364,13 +447,16 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: 1.25rem 1.5rem;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--duration-fast) var(--ease-folio),
+              box-shadow var(--duration-fast) var(--ease-folio);
   box-shadow: 0 1px 3px rgba(32, 50, 61, 0.04);
 }
 
-.document-card-row:hover {
-  border-color: #B8C7C3;
-  box-shadow: 0 3px 8px rgba(32, 50, 61, 0.07);
+@media (hover: hover) and (pointer: fine) {
+  .document-card-row:hover {
+    border-color: #B2C3BF;
+    box-shadow: 0 3px 8px rgba(32, 50, 61, 0.08);
+  }
 }
 
 .doc-row-title {
@@ -385,11 +471,20 @@
 .doc-row-title a {
   color: var(--color-text);
   text-decoration: none;
-  transition: color 0.15s ease;
+  display: inline;
+  background-image: linear-gradient(var(--color-accent), var(--color-accent));
+  background-size: 0% 1.5px;
+  background-repeat: no-repeat;
+  background-position: left 100%;
+  transition: color var(--duration-fast) var(--ease-folio),
+              background-size var(--duration-fast) var(--ease-folio);
 }
 
-.doc-row-title a:hover {
-  color: var(--color-accent);
+@media (hover: hover) and (pointer: fine) {
+  .doc-row-title a:hover {
+    color: var(--color-accent);
+    background-size: 100% 1.5px;
+  }
 }
 
 .doc-row-meta {
@@ -502,7 +597,7 @@
   color: var(--color-accent);
 }
 
-/* Sidebar collapsible section */
+/* Sidebar collapsible section & Accordion */
 .sidebar-collapsible-section {
   margin-bottom: 0.5rem;
 }
@@ -526,6 +621,26 @@
 .toggle-icon {
   font-size: 0.65rem;
   color: var(--color-muted);
+  display: inline-block;
+  transition: transform var(--duration-panel) var(--ease-folio);
+}
+
+.sidebar-toggle-btn[aria-expanded="true"] .toggle-icon {
+  transform: rotate(180deg);
+}
+
+.collapsible-accordion {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--duration-panel) var(--ease-folio);
+}
+
+.collapsible-accordion.is-open {
+  grid-template-rows: 1fr;
+}
+
+.collapsible-inner {
+  overflow: hidden;
 }
 
 /* ==========================================================================
@@ -699,7 +814,14 @@
   background: var(--color-surface);
   color: var(--color-text);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: border-color var(--duration-fast) var(--ease-folio),
+              color var(--duration-fast) var(--ease-folio),
+              background-color var(--duration-fast) var(--ease-folio),
+              transform var(--duration-fast) var(--ease-folio);
+}
+
+.like-btn:active {
+  transform: scale(0.96);
 }
 
 .like-btn:hover {
@@ -713,8 +835,53 @@
   color: var(--color-danger);
 }
 
+.like-btn.like-pop .heart-icon {
+  animation: likePop var(--duration-state) var(--ease-folio) both;
+}
+
+@keyframes likePop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+
 .heart-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 1.1rem;
+  transition: fill var(--duration-fast) var(--ease-folio),
+              stroke var(--duration-fast) var(--ease-folio);
+}
+
+/* Reading Progress Bar (top of viewport on detail view) */
+.reading-progress-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: var(--color-accent);
+  z-index: 1001;
+  transform-origin: left;
+  transform: scaleX(0);
+  will-change: transform;
+  pointer-events: none;
+}
+
+/* Table of Contents Heading Target Flash */
+.heading-target-flash {
+  animation: headingFlash 600ms var(--ease-folio) both;
+}
+
+@keyframes headingFlash {
+  0% {
+    background-color: rgba(22, 103, 91, 0.16);
+    border-radius: 4px;
+  }
+  100% {
+    background-color: transparent;
+  }
 }
 
 .detail-summary-card {
@@ -1170,14 +1337,26 @@
   }
 
   .library-sidebar {
-    display: none;
+    display: block;
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
     position: static;
-    margin-bottom: 1.25rem;
-    box-shadow: var(--shadow-sm);
+    margin-bottom: 0;
+    box-shadow: none;
+    pointer-events: none;
+    transition: max-height var(--duration-panel) var(--ease-folio),
+                opacity var(--duration-state) var(--ease-folio),
+                margin-bottom var(--duration-panel) var(--ease-folio);
   }
 
   .library-sidebar.open {
-    display: block;
+    max-height: 1400px;
+    opacity: 1;
+    overflow: visible;
+    margin-bottom: 1.25rem;
+    box-shadow: var(--shadow-sm);
+    pointer-events: auto;
   }
 
   .library-toolbar {
@@ -1281,8 +1460,103 @@ a:focus-visible {
   outline-offset: 2px !important;
 }
 
+/* Skeleton placeholder cards (delayed loading >150ms) */
+.skeleton-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.skeleton-line {
+  height: 14px;
+  background: linear-gradient(90deg, #ECEEEB 25%, #F4F6F3 50%, #ECEEEB 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+.skeleton-line.title {
+  height: 22px;
+  width: 65%;
+}
+
+.skeleton-line.meta {
+  height: 12px;
+  width: 40%;
+}
+
+.skeleton-line.desc {
+  height: 14px;
+  width: 90%;
+}
+
+.skeleton-line.desc-short {
+  height: 14px;
+  width: 70%;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Mobile drawer slide down */
+@media (max-width: 860px) {
+  .library-sidebar.open {
+    animation: drawerSlideDown var(--duration-panel) var(--ease-folio) both;
+  }
+}
+
+@keyframes drawerSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* View Transitions Shared Element */
+::view-transition-old(folio-doc-title),
+::view-transition-new(folio-doc-title) {
+  animation-duration: var(--duration-nav);
+  animation-timing-function: var(--ease-folio);
+  height: 100%;
+  overflow: clip;
+}
+
+::view-transition-old(root) {
+  animation: folioFadeOut var(--duration-fast) ease-out both;
+}
+::view-transition-new(root) {
+  animation: folioFadeIn var(--duration-fast) ease-in both;
+}
+
+@keyframes folioFadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes folioFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 /* Respect user's motion preferences */
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0.001ms !important;
+    --duration-state: 0.001ms !important;
+    --duration-panel: 0.001ms !important;
+    --duration-nav: 0.001ms !important;
+    --duration-entrance: 0.001ms !important;
+  }
+
   *,
   *::before,
   *::after {
@@ -1290,6 +1564,33 @@ a:focus-visible {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
+  }
+
+  .card-entrance,
+  .documents-list-fade,
+  .active-filter-chip,
+  .heading-target-flash,
+  .like-btn.like-pop .heart-icon,
+  .skeleton-line,
+  .library-sidebar,
+  .library-sidebar.open {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .doc-row-title a {
+    background-image: none !important;
+    transition: none !important;
+  }
+
+  .doc-row-title a:hover {
+    text-decoration: underline !important;
+  }
+
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
   }
 
   .spinner {

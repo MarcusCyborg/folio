@@ -32,6 +32,14 @@
   --shadow-lg: 0 8px 24px rgba(32, 50, 61, 0.15);
 
   --header-height: 68px;
+
+  /* Folio Motion Tokens */
+  --duration-fast: 140ms;
+  --duration-state: 200ms;
+  --duration-panel: 240ms;
+  --duration-nav: 320ms;
+  --duration-entrance: 380ms;
+  --ease-folio: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 *, *::before, *::after {
@@ -79,6 +87,7 @@ body {
   position: sticky;
   top: 0;
   z-index: 100;
+  view-transition-name: folio-header;
 }
 
 .shell-header-inner {
