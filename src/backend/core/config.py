@@ -16,6 +16,13 @@ ENV_ALIASES = {
     "prod": "production",
 }
 
+def normalize_database_url(url: str) -> str:
+    """Use the installed psycopg driver for provider-issued PostgreSQL URLs."""
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
+
 def normalize_env(raw_env: str) -> str:
     cleaned = (raw_env or "development").strip().lower()
     return ENV_ALIASES.get(cleaned, cleaned)
@@ -42,7 +49,7 @@ class Settings:
         self.PROJECT_ROOT: Path = PROJECT_ROOT
         self.APP_ENV: str = normalize_env(os.getenv("APP_ENV", "development"))
         self.APP_SECRET: str = os.getenv("APP_SECRET", "folio_dev_insecure_secret_key_change_in_production_32bytes_min")
-        self.DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql+psycopg://postgres@127.0.0.1:5432/folio")
+        self.DATABASE_URL: str = normalize_database_url(os.getenv("DATABASE_URL", "postgresql+psycopg://postgres@127.0.0.1:5432/folio"))
         self.TEST_DATABASE_URL: str = os.getenv("TEST_DATABASE_URL", "postgresql+psycopg://postgres@127.0.0.1:5432/folio_test")
         self.COOKIE_SECURE: bool = os.getenv("COOKIE_SECURE", "false").lower() in ("true", "1", "yes")
         self.COOKIE_SAMESITE: str = os.getenv("COOKIE_SAMESITE", "lax").lower()
