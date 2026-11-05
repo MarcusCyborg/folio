@@ -221,3 +221,80 @@ All pre-existing untracked files are preserved:
 - **Pre-commit HEAD:** `8e43a4efa2d182f31651bf6d042e817d940778a5`
 - **Target Branch:** `codex/integration-b`
 - **Commit Message:** `fix(ops): remediate P08 P2 review findings`
+
+---
+
+## 7. Post-Remediation Dependency Follow-up
+
+### 7.1 Issue Summary & Root Cause
+Following the P08 P2 remediation, a dependency declaration blocker was identified:
+- `scripts/ops/init_certs.py` and `scripts/ops/verify_ops_unit.py` rely on the Python `cryptography` library for X.509 certificate generation, SAN extension handling, PEM serialization/parsing, and public/private key-pair matching.
+- However, `cryptography` was missing from both `requirements.txt` and `constraints.txt`.
+- In a pristine virtual environment (such as `F:\dpl13.10\folio-live-runtime\venv-clean` or a fresh Docker builder stage), running `validate_compose_and_config.py` and `verify_ops_unit.py` failed with:
+  ```text
+  CertificateError: The 'cryptography' library is required to generate SSL certificates.
+  Please ensure it is installed in the active environment.
+  ```
+- The issue was masked on developer workstations where `cryptography 48.0.0` was installed in the ambient global Python environment.
+
+### 7.2 Commit & Version Remediation Details
+- **Base Commit:** `8e5ea34666afa0780fd36759607ac0935bd13cab` (`8e5ea34 fix(ops): remediate P08 P2 review findings`)
+- **Fix Commit Message:** `fix(ops): declare cryptography dependency for certificate tooling`
+- **Target Branch:** `codex/integration-b`
+- **Declared Dependencies:**
+  - `requirements.txt`: `cryptography>=42.0.0,<=48.0.0` (lower bound `>=42.0.0` required for `not_valid_before_utc` / `not_valid_after_utc` API; upper bound `<=48.0.0` matches verified constraint).
+  - `constraints.txt`: `cryptography==48.0.0` (pinned to stable release compatible with Python 3.10 and Debian Bookworm; wheels include precompiled OpenSSL bindings).
+
+### 7.3 Clean Virtualenv Verification
+A clean virtualenv was provisioned at `F:\dpl13.10\folio-live-runtime\venv-p08-crypto-check`:
+```powershell
+$venv = "F:\dpl13.10\folio-live-runtime\venv-p08-crypto-check"
+py -3.10 -m venv $venv
+& "$venv\Scripts\python.exe" -m pip install --upgrade pip
+& "$venv\Scripts\python.exe" -m pip install -c constraints.txt -r requirements.txt
+& "$venv\Scripts\python.exe" -c "import cryptography; print(cryptography.__version__)"
+```
+- **Pip Upgrade & Dependency Install:** Exit code `0`. Installed `cryptography-48.0.0`, `cffi-2.1.1`, `typing-extensions-4.16.0`, `pycparser-3.11`.
+- **Import Check Output:** `48.0.0`
+
+### 7.4 Verification Test Execution & Outputs
+1. **Config & Topology Validator (`scripts/ops/validate_compose_and_config.py`):**
+   ```text
+   [INFO] Generating self-signed SSL certificate for domain: validate.local ...
+   [OK] SSL certificate written to: C:\Users\Admin\AppData\Local\Temp\...\folio.crt
+   [OK] SSL private key written to:  C:\Users\Admin\AppData\Local\Temp\...\folio.key
+
+   [OK] All Configuration & Topology Audits Passed:
+     + All 6 required services defined in docker-compose.prod.yml
+     + Strict port exposure invariant: ONLY reverse proxy exposes host ports (DB, worker, chroma internal only)
+     + Network isolation invariant: backend-net internal: true; DB and worker isolated from frontend
+     + Persistence volumes declared for PostgreSQL, shared index, media, and certificates
+     + Healthcheck dependency chain: db -> web -> proxy verified
+     + Multi-stage Dockerfile: builder + runtime, non-root user folio (10001), HEALTHCHECK verified
+     + Entrypoints verified: web, worker (migration-free), one-shot migration runner
+     + Reverse Proxy: HTTP-to-HTTPS redirect, X-Forwarded-*, CSP, and trusted proxy headers verified
+     + .dockerignore: excludes secrets, .git, test artifacts, and local data
+     + .gitattributes: strictly enforces *.sh text eol=lf across all POSIX shell scripts
+     + SSL Certificate Precondition: init_certs.py & init_certs.sh verified for proxy service
+   ```
+2. **Ops & Disaster Recovery Unit Tests (`scripts/ops/verify_ops_unit.py`):**
+   - Installed `requirements-dev.txt` (`pytest==9.2.0`, `httpx==0.28.1`).
+   - Result: `All 13 ops & disaster recovery unit tests PASSED successfully!`
+3. **AST Compilation Check (`py_compile`):**
+   - Compiled `init_certs.py`, `validate_compose_and_config.py`, `verify_ops_unit.py`, `test_ssl_and_gitattributes.py`.
+   - Result: Exit code `0`.
+4. **Targeted SSL Certificate Generator & Validator:**
+   - Result: `CERT_GENERATION_AND_VERIFY_PASS`
+5. **Re-verification on `F:\dpl13.10\folio-live-runtime\venv-clean`:**
+   - Updated `venv-clean` via `pip install -c constraints.txt -r requirements.txt`.
+   - Executed `validate_compose_and_config.py` -> PASSED.
+   - Executed `verify_ops_unit.py` -> PASSED.
+
+### 7.5 Docker Verification Status
+- **Status:** **`BLOCKED_ENV: Docker daemon unavailable`**
+- **Reason:** Docker CLI / daemon is not installed on the current Windows host environment (`CommandNotFoundException`).
+- **Static Invariant:** Multi-stage `Dockerfile` stage 1 installs `-c constraints.txt -r requirements.txt` into `/opt/venv` and copies it to stage 2, guaranteeing `cryptography==48.0.0` is present in the container image.
+
+### 7.6 Blocker Final Status
+- **Final Status:** **RESOLVED**
+- **Verdict:** **`READY_WITH_CONDITIONS`** (clean virtualenv dependency installation and certificate operations 100% verified; host limitations: Docker daemon unavailable, PostgreSQL offline).
