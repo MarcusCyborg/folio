@@ -4,7 +4,8 @@
 **Reviewer Role:** Independent Release Reviewer & QA Lead
 **Workspace:** `F:\dpl13.10\WikiSearchEngine-github`
 **Git Branch:** `codex/integration-b`
-**Git HEAD SHA:** `d11e2004a9431f9d79cba32baf325f5da4bb98cb`
+**Audited Implementation HEAD SHA:** `d11e2004a9431f9d79cba32baf325f5da4bb98cb`
+**Final Release Documentation HEAD SHA:** `f6b896c71b9bd2386dc6e47a3a47f06789859633`
 **Linear Alembic Head:** `20261105_context_fallback (head)`
 **Scope Mode:** Read-only code audit & release documentation (zero new features, zero scope expansion)
 
@@ -35,7 +36,7 @@ Full-Project & Deployment Verdict:
 ## 2. Environment & Working Tree State
 
 - **Branch Check:** `codex/integration-b` matches expected branch.
-- **HEAD Check:** `d11e2004a9431f9d79cba32baf325f5da4bb98cb` matches expected HEAD.
+- **HEAD Check:** Audited implementation baseline `d11e2004a9431f9d79cba32baf325f5da4bb98cb` verified; current repository HEAD `f6b896c71b9bd2386dc6e47a3a47f06789859633` matches expected final release documentation HEAD.
 - **Remote Origin:** `https://github.com/MarcusCyborg/folio.git` (fetch & push).
 - **Working Tree Cleanliness:** All pre-existing untracked review files are preserved:
   - `docs/handoff/review/P03-P07-CHAT-AUDIT-SUMMARY-20261101.md`
@@ -94,7 +95,7 @@ To prevent scope creep and ensure fair rubric alignment, deliverables are strict
 | **G3** | **Advanced Search & Fallback** | **PASSED (OPTIONAL)** | Semantic adapter decoupled; pre-fusion candidate filtering enforced in IB-R03; fallback metadata persisted in `search_contexts` in IB-R04; transparent degradation badges and headers; zero synthetic vector fabrication. |
 | **G4** | **Frontend & User Experience** | **PASSED** | Native ES modules; responsive layouts (360px–1920px) with mobile drawer and table horizontal scrolling; WCAG AA keyboard navigation, modal focus trap, and focus restore; review findings F1–F6 remediated. |
 | **G5** | **Deployment Operations & DR** | **VERIFIED WITH CONDITIONS** | Multi-stage non-root `Dockerfile`; segmented `docker-compose.prod.yml`; one-shot migration runner; liveness/readiness probes; Nginx/Caddy TLS templates; backup/restore with SHA-256 manifests; `cryptography==48.0.0` declared. Live Docker and PG staging are `BLOCKED_ENV` on host. |
-| **G6** | **Delivery & Documentation** | **PASSED** | `README.md`, `docs/acceptance-matrix.md` (v1.2.0), `RELEASE-CHECKLIST.md`, `RELEASE-NOTES.md`, and this report synchronized at commit `d11e200`. Minimal demo script provided. |
+| **G6** | **Delivery & Documentation** | **PASSED** | `README.md`, `docs/acceptance-matrix.md` (v1.2.0), `RELEASE-CHECKLIST.md`, `RELEASE-NOTES.md`, and this report synchronized across audited implementation baseline `d11e200` and finalized at documentation commit `f6b896c`. Minimal demo script provided. |
 
 ---
 
@@ -128,7 +129,7 @@ To prevent scope creep and ensure fair rubric alignment, deliverables are strict
 
 | Finding ID | Severity | File Reference | Gate | Description & Impact | Block Assignment? | Resolution / Recommendation |
 | :--- | :---: | :--- | :---: | :--- | :---: | :--- |
-| **P09-R01** | **P2** | `docs/acceptance-matrix.md` (lines 55–69) | G6 | **Acceptance Matrix Status Desynchronization:** Entries P2-07 through P2-09, P2-13, and P2-14 remained marked `SPECIFICATION APPROVED (PENDING IMPL P05)` despite full implementation in code. | No | Updated `docs/acceptance-matrix.md` to version 1.2.0 reflecting actual verified status at HEAD `d11e200`. |
+| **P09-R01** | **P2** | `docs/acceptance-matrix.md` (lines 55–69) | G6 | **Acceptance Matrix Status Desynchronization:** Entries P2-07 through P2-09, P2-13, and P2-14 remained marked `SPECIFICATION APPROVED (PENDING IMPL P05)` despite full implementation in code. | No | Updated `docs/acceptance-matrix.md` to version 1.2.0 reflecting actual verified status for audited implementation baseline `d11e200` (final documentation commit `f6b896c`). |
 | **P09-R02** | **P2** | Host Workstation (Docker CLI, TCP 5432) | G5 | **Host Workstation Environment:** Workstation lacks running Docker daemon and live PostgreSQL instance. Pytest live database fixtures report `BLOCKED_ENV` (370 skipped). | No | Documented as operational environment condition (`BLOCKED_ENV`). Noted that CI runs full test suite with PostgreSQL service container; standalone unit and validation tools pass 100%. |
 | **P09-R03** | **P3** | `fastapi/testclient.py:1` | G1 | **Starlette / HTTPX Deprecation Notice:** Pytest emits `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated; install httpx2 instead.` Zero runtime functional impact. | No | Monitor future upstream FastAPI / Starlette updates. No code change required. |
 | **P09-R04** | **P3** | `src/backend/search/semantic_adapter.py`, `evaluate/run_eval.py` | G3 | **Semantic Backend Decoupled:** ChromaDB and `sentence-transformers` vector backend decoupled from core runtime; reported as `BLOCKED_ENV` when uninstalled. Semantic search automatically degrades to BM25. | No | Maintain transparent fallback badges and degraded headers in API response and UI. |
@@ -138,7 +139,7 @@ To prevent scope creep and ensure fair rubric alignment, deliverables are strict
 ## 7. Acceptance Matrix Changes
 
 `docs/acceptance-matrix.md` was updated from version 1.1.0 to **1.2.0**:
-1. **Header Metadata:** Baseline updated to `F:/dpl13.10/WikiSearchEngine-github`, branch `codex/integration-b`, HEAD `d11e2004a9431f9d79cba32baf325f5da4bb98cb`.
+1. **Header Metadata:** Baseline updated to `F:/dpl13.10/WikiSearchEngine-github`, branch `codex/integration-b`, audited implementation baseline `d11e2004a9431f9d79cba32baf325f5da4bb98cb`, final repository HEAD `f6b896c71b9bd2386dc6e47a3a47f06789859633`.
 2. **P2-07 (Search API):** Updated from `PENDING IMPL P05` to **`VERIFIED / PASS (P05 & IB-R04)`** with source references (`src/backend/api/search.py`, `search_service.py`, `context_manager.py`) and test references (`test_search_api_basic.py`, `test_search_pagination.py`, `test_search_filters_api.py`, `test_integration_review_probe.py`).
 3. **P2-08 (Stale Index / Live Filter Defense):** Updated from `PENDING IMPL P05` to **`VERIFIED / PASS (P05 & IB-R03)`** with source references (`search_service.py`) and test references (`test_search_live_guard_pruning.py`, `test_draft_deleted_protection.py`, `test_integration_review_probe.py`).
 4. **P2-09 (Standardized Search & Click Event Linking):** Updated from `PENDING IMPL P05` to **`VERIFIED / PASS (P05 & P07)`** with source references (`src/backend/api/events.py`, `engagement_service.py`, `analytics.py`) and test references (`test_click_and_membership.py`, `test_interaction_click_logging.py`).
