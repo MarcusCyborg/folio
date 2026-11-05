@@ -4,7 +4,7 @@
 **Release Date:** 2026-11-05
 **Git Branch:** `codex/integration-b`
 **Audited Implementation Baseline:** `d11e2004a9431f9d79cba32baf325f5da4bb98cb`
-**Final Repository HEAD:** `f6b896c71b9bd2386dc6e47a3a47f06789859633`
+**P09 Release Documentation Baseline:** `f6b896c71b9bd2386dc6e47a3a47f06789859633`
 **Linear Alembic Head:** `20261105_context_fallback (head)`
 **Assignment Verdict:** **ASSIGNMENT_READY**
 **Deployment Verdict:** **READY_WITH_CONDITIONS**

@@ -6,7 +6,7 @@
 **Repository Baseline:** `F:/dpl13.10/WikiSearchEngine-github`
 **Git Branch:** `codex/integration-b`
 **Audited Implementation Baseline:** `d11e2004a9431f9d79cba32baf325f5da4bb98cb`
-**Final Repository HEAD:** `f6b896c71b9bd2386dc6e47a3a47f06789859633` (`f6b896c`)
+**P09 Release Documentation Baseline:** `f6b896c71b9bd2386dc6e47a3a47f06789859633` (`f6b896c`)
 **Context:** Final release-readiness review and quality assurance audit (Milestone M9 / P09) verifying Phase 1 full-stack requirements, Phase 2 core retrieval pipeline, advanced search capabilities, and deployment operations.
 
 > [!IMPORTANT]
@@ -97,7 +97,7 @@
 | **OPS-05** | Production Containerization: Multi-stage Dockerfile, non-root user, Compose with web, worker, DB, Chroma profile | [GEMINI-EXECUTION-PROMPTS.md P08](file:///F:/dpl13.10/WikiSearchEngine-github/GEMINI-EXECUTION-PROMPTS.md#L238), [docker-compose.prod.yml](file:///F:/dpl13.10/WikiSearchEngine-github/docker-compose.prod.yml) | `docker-compose.prod.yml` + `scripts/ops/validate_compose_and_config.py` | **VERIFIED CODE & TOPOLOGY (P08)**<br/>*(Multi-stage Dockerfile, non-root folio user, Compose topology verified; live Docker runtime BLOCKED_ENV on Windows)* | P08 | P01, P02, P05 |
 | **OPS-06** | HTTPS Reverse Proxy & Security Headers: Caddy / Nginx configuration, CSP, HSTS, trusted proxy headers | [GEMINI-EXECUTION-PROMPTS.md P08](file:///F:/dpl13.10/WikiSearchEngine-github/GEMINI-EXECUTION-PROMPTS.md#L242), [docker/proxy/](file:///F:/dpl13.10/WikiSearchEngine-github/docker/proxy) | Nginx template + Caddyfile + `tests/backend/ops/test_request_logging_and_security.py` | **VERIFIED / PASS (P08)**<br/>*(Nginx & Caddy templates, CSP, trusted headers, conditional HSTS, HTTP-to-HTTPS redirect)* | P08 | P01, P08 |
 | **OPS-07** | Backup & Disaster Recovery: Automated database dump, index metadata backup, and documented restore drill | [GEMINI-EXECUTION-PROMPTS.md P08](file:///F:/dpl13.10/WikiSearchEngine-github/GEMINI-EXECUTION-PROMPTS.md#L243), [scripts/ops/](file:///F:/dpl13.10/WikiSearchEngine-github/scripts/ops) | `scripts/ops/backup.py`, `restore.py`, `verify_ops_unit.py` | **VERIFIED / PASS (P08)**<br/>*(SHA-256 manifest, database dump/restore, index rebuild on loss, tamper rejection; 13/13 unit tests pass)* | P08 | P08 |
-| **OPS-08** | Final Release Verification Gates: Independent QA audit of Gates G1 through G6 before release candidate freeze | [GEMINI-EXECUTION-PROMPTS.md P09](file:///F:/dpl13.10/WikiSearchEngine-github/GEMINI-EXECUTION-PROMPTS.md#L259-L266) | `docs/release/RELEASE-CHECKLIST.md`, `docs/release/RELEASE-NOTES.md`, `docs/handoff/gemini/P09-final-qa.md` | **VERIFIED / COMPLETED (P09)**<br/>*(Independent QA audit of Gates G1-G6 across audited implementation baseline `d11e200`, P09 documentation finalized at commit `f6b896c`; Assignment: ASSIGNMENT_READY; Ops: READY_WITH_CONDITIONS)* | P09 | P01–P08 |
+| **OPS-08** | Final Release Verification Gates: Independent QA audit of Gates G1 through G6 before release candidate freeze | [GEMINI-EXECUTION-PROMPTS.md P09](file:///F:/dpl13.10/WikiSearchEngine-github/GEMINI-EXECUTION-PROMPTS.md#L259-L266) | `docs/release/RELEASE-CHECKLIST.md`, `docs/release/RELEASE-NOTES.md`, `docs/handoff/gemini/P09-final-qa.md` | **VERIFIED / COMPLETED (P09)**<br/>*(Independent QA audit of Gates G1-G6 across audited implementation baseline `d11e200`; P09 release artifacts introduced in documentation baseline commit `f6b896c`; Assignment: ASSIGNMENT_READY; Ops: READY_WITH_CONDITIONS)* | P09 | P01–P08 |
 
 ---
 

@@ -5,7 +5,7 @@
 **Workspace:** `F:\dpl13.10\WikiSearchEngine-github`
 **Branch:** `codex/integration-b`
 **Audited Implementation HEAD:** `d11e2004a9431f9d79cba32baf325f5da4bb98cb`
-**Final Repository HEAD:** `f6b896c71b9bd2386dc6e47a3a47f06789859633`
+**P09 Release Documentation Baseline:** `f6b896c71b9bd2386dc6e47a3a47f06789859633`
 **Linear Alembic Head:** `20261105_context_fallback (head)`
 
 ---
@@ -81,7 +81,7 @@
 - **Gate Description:** Alignment between README, acceptance matrix, release checklist, release notes, evaluation benchmarks, and commit SHA.
 - **Implementation Evidence:**
   - `README.md`: Verified accurate quickstart, technology stack, demo accounts, and dependency stratification.
-  - `docs/acceptance-matrix.md`: Version 1.2.0 reflects audited implementation baseline `d11e200`, updating P2-07..P2-09, P2-13, P2-14, OPS-08; release documentation synchronized in final P09 documentation commit `f6b896c`.
+  - `docs/acceptance-matrix.md`: Version 1.2.0 reflects audited implementation baseline `d11e200`, updating P2-07..P2-09, P2-13, P2-14, OPS-08; P09 release artifacts were introduced in documentation baseline commit `f6b896c`.
   - `docs/release/RELEASE-CHECKLIST.md`: This release gate audit.
   - `docs/release/RELEASE-NOTES.md`: Comprehensive release notes and changelog.
   - `docs/handoff/gemini/P09-final-qa.md`: Final QA engineering report.
@@ -93,7 +93,7 @@
 
 | Finding ID | Severity | Requirement / Gate | File & Line Reference | Summary | Impact | Blocks Assignment? | Minimal Recommendation |
 | :--- | :---: | :---: | :--- | :--- | :--- | :---: | :--- |
-| **P09-R01** | **P2** | Delivery / Matrix Sync (G6) | `docs/acceptance-matrix.md` (lines 55–69) | Acceptance matrix status desynchronization: entries P2-07, P2-08, P2-09, P2-13, and P2-14 remained marked `SPECIFICATION APPROVED (PENDING IMPL P05)` despite full implementation and verification. | Documentation inconsistency; evaluators may believe core search endpoints were unimplemented. | **NO** | Updated `docs/acceptance-matrix.md` to version 1.2.0 reflecting actual verified status for audited implementation baseline `d11e200` (final documentation commit `f6b896c`). |
+| **P09-R01** | **P2** | Delivery / Matrix Sync (G6) | `docs/acceptance-matrix.md` (lines 55–69) | Acceptance matrix status desynchronization: entries P2-07, P2-08, P2-09, P2-13, and P2-14 remained marked `SPECIFICATION APPROVED (PENDING IMPL P05)` despite full implementation and verification. | Documentation inconsistency; evaluators may believe core search endpoints were unimplemented. | **NO** | Updated `docs/acceptance-matrix.md` to version 1.2.0 reflecting actual verified status for audited implementation baseline `d11e200`; the P09 artifact set was introduced in documentation baseline commit `f6b896c`. |
 | **P09-R02** | **P2** | Operations / Host Environment (G5) | Host Workstation (Docker CLI, TCP 5432) | Host workstation lacks running Docker daemon (`docker: command not found`) and local PostgreSQL service (`postgresql+psycopg://...:5432` unreachable). | Pytest live database fixtures report `BLOCKED_ENV` (370 skipped). Full containerized staging cannot be launched locally without Docker. | **NO** | Document as operational environment condition (`BLOCKED_ENV`). Note that CI runs full test suite with PostgreSQL service container; standalone unit and validation tools pass 100%. |
 | **P09-R03** | **P3** | Maintenance / Hygiene (G1) | Python environment (`fastapi/testclient.py:1`) | Pytest emits `StarletteDeprecationWarning: Using httpx with starlette.testclient is deprecated; install httpx2 instead.` | Deprecation notice only; zero runtime functional impact. | **NO** | Keep existing pinned versions; monitor future FastAPI/Starlette dependency updates. |
 | **P09-R04** | **P3** | Observability / Advanced (G3) | `src/backend/search/semantic_adapter.py`, `evaluate/run_eval.py` | ChromaDB and `sentence-transformers` vector backend decoupled from core runtime; reported as `BLOCKED_ENV` when uninstalled. | Semantic vector search automatically degrades to BM25 in clean environments. Lexical BM25 core is completely unaffected. | **NO** | Maintain transparent fallback badges and degraded headers in API response and UI. |
