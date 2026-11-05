@@ -320,6 +320,10 @@ export async function renderLibrary(container, routeContext) {
   } catch (err) {
     if (err.name === 'AbortError') return;
     console.warn('Failed to load categories list:', err);
+    const catContainer = container.querySelector('#categoryFilterList');
+    if (catContainer) {
+      catContainer.textContent = 'Collections are temporarily unavailable.';
+    }
   }
 
   // Populate active filter chips bar
@@ -631,6 +635,8 @@ export async function renderLibrary(container, routeContext) {
 
   } catch (err) {
     if (err.name === 'AbortError') return;
+    const statsText = container.querySelector('#resultsCountText');
+    if (statsText) statsText.textContent = 'Unable to load documents';
     renderError(container.querySelector('#documentsListContainer'), err, {
       onRetry: () => renderLibrary(container, routeContext)
     });
