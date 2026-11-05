@@ -1,0 +1,36 @@
+# ==============================================================================
+# Folio Reverse Proxy Configuration (Caddy Alternative)
+# Provides automatic HTTPS, modern TLS, security headers, and reverse proxying.
+# ==============================================================================
+
+{$DOMAIN_NAME:localhost} {
+    # Automatic TLS or custom certs
+    tls {$TLS_CERT_PATH:/etc/caddy/certs/folio.crt} {$TLS_KEY_PATH:/etc/caddy/certs/folio.key} {
+        protocols tls1.2 tls1.3
+    }
+
+    # Security Headers
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
+        # HSTS enabled conditionally in production
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        -Server
+    }
+
+    # Reverse proxy to internal web service
+    reverse_proxy web:8000 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Host {host}
+        header_up X-Request-ID {http.request.header.X-Request-ID}
+    }
+
+    # Gzip & Zstandard encoding
+    encode zstd gzip
+}

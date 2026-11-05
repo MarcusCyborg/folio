@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Optional
 from fastapi import FastAPI, Query, Depends, Response, Request, status
@@ -22,6 +23,7 @@ from src.backend.core.exceptions import (
 )
 from src.backend.core.rate_limit import RateLimitStoreUnavailableError
 from src.backend.core.middleware import (
+    RequestLoggingMiddleware,
     SecurityHeadersMiddleware,
     OriginVerificationMiddleware,
 )
@@ -66,7 +68,8 @@ app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, unhandled_exception_handler)
 
-# Security Middlewares
+# Observability and Security Middlewares
+app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(OriginVerificationMiddleware)
 
@@ -80,8 +83,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Core Phase 1 Health Check
-@app.get("/health")
+# Core Phase 1 Health Check (Backward-Compatible)
+@app.get("/health", tags=["ops"])
 def health_check(response: Response, db: Session = Depends(get_db)):
     """
     Lightweight health check.
@@ -108,6 +111,143 @@ def health_check(response: Response, db: Session = Depends(get_db)):
         "status": "ok",
         "database": db_status,
         "legacy_search": "enabled" if settings.ENABLE_LEGACY_SEARCH else "disabled",
+    }
+
+
+# Phase 2 / SRE Liveness Probe
+@app.get("/health/live", tags=["ops"])
+def liveness_check():
+    """
+    Kubernetes / Docker lightweight liveness probe.
+    Returns 200 immediately to confirm web process is alive and responsive.
+    """
+    return {
+        "status": "alive",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "app": "folio",
+        "version": "2.0.0",
+        "env": settings.APP_ENV,
+    }
+
+
+# Phase 2 / SRE Comprehensive Readiness Probe
+@app.get("/health/ready", tags=["ops"])
+def readiness_check(response: Response, db: Session = Depends(get_db)):
+    """
+    Comprehensive readiness probe distinguishing:
+    1. Database connectivity (503 if unreachable).
+    2. Search index status & generation integrity (BM25 vs ILIKE fallback).
+    3. Worker queue lag & dead-letter failed jobs.
+    4. Semantic backend availability & degradation reason.
+    Returns 200 when service can serve traffic (even with degraded search fallbacks).
+    """
+    # 1. Database Check
+    try:
+        db.execute(text("SELECT 1;"))
+        db_status = "ok"
+    except Exception as exc:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {
+            "status": "unavailable",
+            "database": "unavailable",
+            "error": "Database connectivity failed" if settings.APP_ENV in ("production", "staging") else str(exc),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    # 2. Search Index & Generation Status
+    search_info = {
+        "engine": "ilike_fallback",
+        "status": "degraded",
+        "generation_id": None,
+        "generation_num": None,
+        "doc_count": 0,
+        "is_degraded": True,
+        "degraded_reason": "No active lexical index generation or postings file missing",
+    }
+    try:
+        from src.backend.search_index.manager import GenerationManager
+        from src.backend.search_index.storage import GenerationStorage
+
+        active_gen = GenerationManager.get_active_generation(db)
+        if active_gen:
+            storage = GenerationStorage(active_gen.id)
+            stats_path = storage.postings_dir / "index_stats.json"
+            if stats_path.exists():
+                search_info = {
+                    "engine": "bm25",
+                    "status": "ready",
+                    "generation_id": active_gen.id,
+                    "generation_num": active_gen.generation_num,
+                    "doc_count": active_gen.doc_count,
+                    "is_degraded": False,
+                    "degraded_reason": None,
+                }
+            else:
+                search_info["degraded_reason"] = (
+                    f"Generation {active_gen.generation_num} active in DB but posting files missing on disk"
+                )
+    except Exception as exc:
+        search_info["degraded_reason"] = f"Failed to inspect index generation: {str(exc)}"
+
+    # 3. Worker & Outbox Stats
+    worker_info = {
+        "status": "unknown",
+        "pending_jobs": 0,
+        "processing_jobs": 0,
+        "completed_jobs": 0,
+        "failed_jobs_dlq": 0,
+        "lag_seconds": 0.0,
+    }
+    try:
+        from src.backend.search_index.manager import GenerationManager
+        idx_status = GenerationManager.get_index_status(db)
+        outbox = idx_status.get("outbox_jobs", {})
+        pending = outbox.get("pending", 0)
+        failed = outbox.get("failed", 0)
+        lag = idx_status.get("index_lag_seconds", 0.0)
+
+        w_status = "healthy"
+        if lag > 120.0 or pending > 500:
+            w_status = "lagging"
+        elif failed > 0:
+            w_status = "degraded"
+
+        worker_info = {
+            "status": w_status,
+            "pending_jobs": pending,
+            "processing_jobs": outbox.get("processing", 0),
+            "completed_jobs": outbox.get("completed", 0),
+            "failed_jobs_dlq": failed,
+            "lag_seconds": lag,
+        }
+    except Exception as exc:
+        worker_info["error"] = str(exc)
+
+    # 4. Semantic Backend Status
+    semantic_info = {
+        "status": "unavailable",
+        "reason": "Semantic engine not initialized",
+    }
+    try:
+        from src.backend.services.search.semantic_adapter import SemanticAdapter
+        sem_avail, sem_reason = SemanticAdapter.check_availability()
+        semantic_info = {
+            "status": "available" if sem_avail else "unavailable",
+            "reason": sem_reason or ("Online" if sem_avail else "ChromaDB unreachable"),
+        }
+    except Exception as exc:
+        semantic_info = {
+            "status": "unavailable",
+            "reason": str(exc),
+        }
+
+    return {
+        "status": "ready",
+        "database": db_status,
+        "search": search_info,
+        "worker": worker_info,
+        "semantic": semantic_info,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 # Optional Legacy Search Engine Service (Cached & Lazy Initialized)

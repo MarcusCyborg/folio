@@ -1,9 +1,14 @@
 version: '3.8'
 
+# ==============================================================================
+# Folio Development Docker Compose
+# Local development environment with exposed PostgreSQL and optional Chroma.
+# ==============================================================================
+
 services:
   db:
     image: postgres:16-alpine
-    container_name: folio-postgres
+    container_name: folio-postgres-dev
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
@@ -12,12 +17,27 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - folio-pgdata:/var/lib/postgresql/data
+      - folio-pgdata-dev:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
 
+  # Optional local ChromaDB container
+  chroma:
+    image: chromadb/chroma:0.5.20
+    container_name: folio-chroma-dev
+    profiles:
+      - semantic
+    ports:
+      - "8000:8000"
+    volumes:
+      - folio-chromadata-dev:/chroma/chroma
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+
 volumes:
-  folio-pgdata:
+  folio-pgdata-dev:
+  folio-chromadata-dev:

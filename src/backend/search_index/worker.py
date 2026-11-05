@@ -1,15 +1,20 @@
 import uuid
 import time
+import signal
+import threading
+import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Callable
+from typing import Optional, List, Callable, Dict, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func
 
 from src.backend.models.document import Document
 from src.backend.models.search_index import IndexJob, IndexGeneration
 from src.backend.search_index.hashing import compute_doc_instance_hash
 from src.backend.search_index.storage import GenerationStorage
 from src.backend.search_index.manager import GenerationManager
+
+logger = logging.getLogger("folio.worker")
 
 
 class IndexWorker:
@@ -28,6 +33,35 @@ class IndexWorker:
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
         self.base_backoff_sec = base_backoff_sec
         self.lock_timeout_sec = lock_timeout_sec
+
+    @classmethod
+    def get_metrics(cls, db: Session) -> Dict[str, Any]:
+        """Collects worker queue and lag metrics from index_jobs table."""
+        now = datetime.now(timezone.utc)
+        pending = db.query(func.count(IndexJob.id)).filter(IndexJob.state == "pending").scalar() or 0
+        processing = db.query(func.count(IndexJob.id)).filter(IndexJob.state == "processing").scalar() or 0
+        failed = db.query(func.count(IndexJob.id)).filter(IndexJob.state == "failed").scalar() or 0
+        completed = db.query(func.count(IndexJob.id)).filter(IndexJob.state == "completed").scalar() or 0
+        oldest_pending = (
+            db.query(IndexJob.created_at)
+            .filter(IndexJob.state == "pending")
+            .order_by(IndexJob.created_at.asc())
+            .first()
+        )
+        lag_seconds = 0.0
+        if oldest_pending and oldest_pending[0]:
+            created = oldest_pending[0]
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            lag_seconds = max(0.0, (now - created).total_seconds())
+
+        return {
+            "pending_jobs": pending,
+            "processing_jobs": processing,
+            "failed_jobs_dlq": failed,
+            "completed_jobs": completed,
+            "lag_seconds": round(lag_seconds, 2),
+        }
 
     def recover_stale_locks(self, db: Session) -> int:
         """
@@ -227,3 +261,152 @@ class IndexWorker:
             if success:
                 processed += 1
         return processed
+
+    def run_daemon(
+        self,
+        poll_interval: float = 1.0,
+        batch_size: int = 10,
+        stop_event: Optional[Any] = None,
+        max_iterations: Optional[int] = None,
+        session_factory: Optional[Callable[[], Session]] = None,
+    ) -> int:
+        """
+        Runs the worker continuously in a daemon loop.
+        Logs worker progress, lag, and dead-letter queue metrics.
+        Gracefully halts when stop_event is signaled or max_iterations reached.
+        """
+        if session_factory is None:
+            from src.backend.core.database import SessionLocal
+            session_factory = SessionLocal
+
+        logger.info(
+            f"Starting IndexWorker daemon [{self.worker_id}] "
+            f"(poll_interval={poll_interval}s, batch_size={batch_size})"
+        )
+
+        # Initial crash recovery for stale locks
+        db = session_factory()
+        try:
+            recovered = self.recover_stale_locks(db)
+            if recovered > 0:
+                logger.warning(
+                    f"Worker [{self.worker_id}] recovered {recovered} stale locked job(s) from prior crash"
+                )
+        except Exception as exc:
+            logger.error(f"Error during initial lock recovery: {exc}")
+        finally:
+            db.close()
+
+        total_processed = 0
+        iteration = 0
+        last_heartbeat = time.monotonic()
+        consecutive_errors = 0
+
+        while True:
+            if stop_event and stop_event.is_set():
+                logger.info(f"Stop signal received. IndexWorker [{self.worker_id}] shutting down gracefully.")
+                break
+
+            if max_iterations is not None and iteration >= max_iterations:
+                logger.info(f"Reached max iterations ({max_iterations}). IndexWorker exiting.")
+                break
+
+            iteration += 1
+            processed = 0
+            db = session_factory()
+            try:
+                processed = self.run_once(db, batch_size=batch_size)
+                total_processed += processed
+                consecutive_errors = 0
+
+                if processed > 0:
+                    metrics = self.get_metrics(db)
+                    logger.info(
+                        f"Worker [{self.worker_id}] processed {processed} job(s). "
+                        f"Pending: {metrics['pending_jobs']}, Lag: {metrics['lag_seconds']}s, DLQ: {metrics['failed_jobs_dlq']}"
+                    )
+            except Exception as exc:
+                consecutive_errors += 1
+                backoff = min(15.0, 1.0 * (2 ** min(consecutive_errors, 4)))
+                logger.error(
+                    f"Worker [{self.worker_id}] loop error (attempt {consecutive_errors}): {exc}. "
+                    f"Backing off {backoff:.1f}s"
+                )
+                time.sleep(backoff)
+                continue
+            finally:
+                db.close()
+
+            # Periodic heartbeat (every 30 seconds)
+            now_mono = time.monotonic()
+            if now_mono - last_heartbeat >= 30.0:
+                last_heartbeat = now_mono
+                db = session_factory()
+                try:
+                    metrics = self.get_metrics(db)
+                    logger.info(
+                        f"Worker [{self.worker_id}] heartbeat: "
+                        f"pending={metrics['pending_jobs']}, processing={metrics['processing_jobs']}, "
+                        f"dlq={metrics['failed_jobs_dlq']}, lag={metrics['lag_seconds']}s"
+                    )
+                except Exception:
+                    pass
+                finally:
+                    db.close()
+
+            # Sleep when idle
+            if processed == 0:
+                if stop_event:
+                    stop_event.wait(timeout=poll_interval)
+                else:
+                    time.sleep(poll_interval)
+
+        return total_processed
+
+
+def main():
+    """CLI entrypoint for running the worker daemon."""
+    import argparse
+    parser = argparse.ArgumentParser(description="Folio Search Index Lifecycle Worker Daemon")
+    parser.add_argument("--poll-interval", type=float, default=1.0, help="Poll interval in seconds (default: 1.0)")
+    parser.add_argument("--batch-size", type=int, default=10, help="Batch size for claiming jobs (default: 10)")
+    parser.add_argument("--worker-id", type=str, default=None, help="Worker ID (default: auto-generated UUID)")
+    parser.add_argument("--once", action="store_true", help="Run a single poll iteration and exit")
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
+    )
+
+    worker = IndexWorker(worker_id=args.worker_id)
+    if args.once:
+        from src.backend.core.database import SessionLocal
+        db = SessionLocal()
+        try:
+            n = worker.run_once(db, batch_size=args.batch_size)
+            print(f"Processed {n} job(s)")
+            return 0
+        finally:
+            db.close()
+
+    stop_event = threading.Event()
+
+    def _sig_handler(signum, frame):
+        logger.info(f"Received signal {signum}. Requesting worker stop...")
+        stop_event.set()
+
+    signal.signal(signal.SIGINT, _sig_handler)
+    signal.signal(signal.SIGTERM, _sig_handler)
+
+    worker.run_daemon(
+        poll_interval=args.poll_interval,
+        batch_size=args.batch_size,
+        stop_event=stop_event,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())
