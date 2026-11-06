@@ -10,6 +10,8 @@ export function attachMentionsAutocomplete(textarea, wrapperElement) {
   let debounceTimer = null;
   let activeQuery = '';
   let matchStartIndex = -1;
+  let currentAbortController = null;
+  let requestSequence = 0;
 
   function createPopup() {
     if (popupEl) return popupEl;
@@ -100,11 +102,23 @@ export function attachMentionsAutocomplete(textarea, wrapperElement) {
 
     activeQuery = match[1];
     matchStartIndex = cursorPos - match[0].length;
+    const querySnapshot = activeQuery;
+    const seq = ++requestSequence;
+
+    if (currentAbortController) {
+      currentAbortController.abort();
+    }
+    currentAbortController = new AbortController();
 
     try {
       const users = await api('/users/mentions', {
         query: { q: activeQuery, page: 1, page_size: 5 },
+        signal: currentAbortController.signal,
       });
+
+      if (seq !== requestSequence || activeQuery !== querySnapshot) {
+        return;
+      }
 
       if (!Array.isArray(users) || users.length === 0) {
         hidePopup();
@@ -115,8 +129,10 @@ export function attachMentionsAutocomplete(textarea, wrapperElement) {
       selectedIndex = 0;
       renderMatches();
     } catch (err) {
-      // Mentions lookup requires authentication or may fail gracefully
-      hidePopup();
+      if (err.name === 'AbortError') return;
+      if (seq === requestSequence) {
+        hidePopup();
+      }
     }
   }
 
@@ -160,6 +176,7 @@ export function attachMentionsAutocomplete(textarea, wrapperElement) {
 
   return function cleanup() {
     clearTimeout(debounceTimer);
+    if (currentAbortController) currentAbortController.abort();
     textarea.removeEventListener('input', onInput);
     textarea.removeEventListener('keydown', onKeyDown);
     textarea.removeEventListener('blur', onBlur);

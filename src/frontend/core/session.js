@@ -11,6 +11,36 @@ let sessionState = {
 
 const listeners = new Set();
 
+let authChannel = null;
+try {
+  if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+    authChannel = new BroadcastChannel('folio_auth_channel');
+    authChannel.onmessage = (event) => {
+      if (event.data?.type === 'AUTH_STATE_CHANGED') {
+        refreshSession();
+      }
+    };
+  }
+} catch (_) {}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'folio_auth_sync') {
+      refreshSession();
+    }
+  });
+  window.addEventListener('focus', () => {
+    refreshSession();
+  });
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        refreshSession();
+      }
+    });
+  }
+}
+
 function emit() {
   const snapshot = getSession();
   listeners.forEach((fn) => {
@@ -30,7 +60,7 @@ export function getSession() {
   };
 }
 
-export function setSessionData(user, csrf_token) {
+export function setSessionData(user, csrf_token, { broadcast = true } = {}) {
   sessionState = {
     user: user || null,
     csrf_token: csrf_token || '',
@@ -38,12 +68,18 @@ export function setSessionData(user, csrf_token) {
   };
   setCsrfToken(csrf_token);
   emit();
+  if (broadcast) {
+    try {
+      if (authChannel) authChannel.postMessage({ type: 'AUTH_STATE_CHANGED' });
+      localStorage.setItem('folio_auth_sync', String(Date.now()));
+    } catch (_) {}
+  }
 }
 
 export async function refreshSession() {
   try {
     const data = await api('/auth/session');
-    setSessionData(data.user, data.csrf_token);
+    setSessionData(data.user, data.csrf_token, { broadcast: false });
     return getSession();
   } catch (err) {
     console.warn('Failed to refresh session:', err);

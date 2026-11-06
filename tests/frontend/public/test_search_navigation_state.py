@@ -34,7 +34,9 @@ def test_search_api_connected_on_query(live_server, browser_instance):
 
     # Verify search telemetry header and rank badges are visible
     telemetry_bar = page.locator("#searchTelemetryBar")
+    telemetry_bar.wait_for(state="visible", timeout=10000)
     assert telemetry_bar.is_visible()
+    page.locator(".doc-rank-badge").first.wait_for(state="visible", timeout=10000)
     assert page.locator(".doc-rank-badge").first.is_visible()
     assert "#1" in page.locator(".doc-rank-badge").first.text_content()
 

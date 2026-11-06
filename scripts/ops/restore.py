@@ -45,6 +45,29 @@ class IndexRecoveryError(Exception):
     pass
 
 
+def find_pg_tool(tool_name: str) -> Optional[str]:
+    # 1. Check PATH
+    found = shutil.which(tool_name)
+    if found:
+        return found
+    # 2. Check POSTGRES_BIN_PATH
+    custom_bin = os.environ.get("POSTGRES_BIN_PATH")
+    if custom_bin:
+        cand = Path(custom_bin) / (tool_name + (".exe" if sys.platform == "win32" else ""))
+        if cand.exists():
+            return str(cand)
+    # 3. Known local paths
+    known_paths = [
+        Path("F:/dpl13.10/folio-live-runtime/pgsql/bin") / (tool_name + ".exe"),
+        Path("C:/Program Files/PostgreSQL/16/bin") / (tool_name + ".exe"),
+        Path("/usr/lib/postgresql/16/bin") / tool_name,
+    ]
+    for p in known_paths:
+        if p.exists():
+            return str(p)
+    return None
+
+
 def compute_sha256(file_path: Path) -> str:
     """Computes SHA-256 hex digest of a file in chunks."""
     h = hashlib.sha256()
@@ -104,21 +127,30 @@ def restore_database(dump_file: Path, target_db_url: str):
     if parsed_url.password:
         env["PGPASSWORD"] = parsed_url.password
 
-    # Try psql if available
-    try:
-        cmd = [
-            "psql",
-            "-h", parsed_url.host or "127.0.0.1",
-            "-p", str(parsed_url.port or 5432),
-            "-U", parsed_url.username or "postgres",
-            "-d", parsed_url.database or "folio",
-            "-f", str(dump_file),
-        ]
-        res = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
-        if res.returncode == 0:
-            return
-    except Exception:
-        pass
+    # Try psql with ON_ERROR_STOP=1 if available
+    psql_bin = find_pg_tool("psql")
+    if psql_bin:
+        try:
+            cmd = [
+                psql_bin,
+                "-v", "ON_ERROR_STOP=1",
+                "-h", parsed_url.host or "127.0.0.1",
+                "-p", str(parsed_url.port or 5432),
+                "-U", parsed_url.username or "postgres",
+                "-d", parsed_url.database or "folio",
+                "-f", str(dump_file),
+            ]
+            res = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
+            if res.returncode == 0:
+                return
+            else:
+                # Fail-closed on database restore error (OPS-04)
+                safe_url = parsed_url.render_as_string(hide_password=True)
+                raise DatabaseRestoreError(f"psql restore failed on {safe_url} with code {res.returncode}: {res.stderr}")
+        except DatabaseRestoreError:
+            raise
+        except Exception as exc:
+            pass
 
     # Fallback to direct connection if psql CLI is missing
     from sqlalchemy import create_engine, text
@@ -145,6 +177,8 @@ def run_post_restore_migrations(target_db_url: str):
 
     cfg = Config(str(PROJECT_ROOT / "alembic.ini"))
     cfg.set_main_option("sqlalchemy.url", target_db_url)
+    import argparse
+    cfg.cmd_opts = argparse.Namespace(x=[f"db_url={target_db_url}"])
     command.upgrade(cfg, "head")
 
 
@@ -277,7 +311,17 @@ def perform_restore(
 
                 from src.backend.search.engine import SearchEngine
                 search_eng = SearchEngine()
-                hits, total, gen_num = search_eng.search("search", limit=5)
+                from src.backend.search_index.manager import GenerationManager
+                active_gen = GenerationManager.get_active_generation(db)
+                if active_gen:
+                    from src.backend.search.engine import SearchQuery
+                    q = SearchQuery(query="search", generation_id=active_gen.id, top_k=5)
+                    s_resp = search_eng.search(q)
+                    hits = s_resp.candidates
+                    total = s_resp.total_matches
+                    gen_num = active_gen.generation_num
+                else:
+                    hits, total, gen_num = [], 0, 0
                 smoke_results["search_smoke_test"] = {
                     "query": "search",
                     "hits_count": len(hits),

@@ -229,8 +229,9 @@ def readiness_check(response: Response, db: Session = Depends(get_db)):
         "reason": "Semantic engine not initialized",
     }
     try:
-        from src.backend.services.search.semantic_adapter import SemanticAdapter
-        sem_avail, sem_reason = SemanticAdapter.check_availability()
+        from src.backend.search.semantic import SemanticAdapter
+        adapter = SemanticAdapter()
+        sem_avail, sem_reason = adapter.check_availability()
         semantic_info = {
             "status": "available" if sem_avail else "unavailable",
             "reason": sem_reason or ("Online" if sem_avail else "ChromaDB unreachable"),

@@ -1337,12 +1337,15 @@
   }
 
   .library-sidebar {
-    display: block;
+    display: none;
     max-height: 0;
     opacity: 0;
     overflow: hidden;
     position: static;
     margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-width: 0;
     box-shadow: none;
     pointer-events: none;
     transition: max-height var(--duration-panel) var(--ease-folio),
@@ -1351,10 +1354,13 @@
   }
 
   .library-sidebar.open {
+    display: block;
     max-height: 1400px;
     opacity: 1;
     overflow: visible;
     margin-bottom: 1.25rem;
+    padding: 1.25rem;
+    border-width: 1px;
     box-shadow: var(--shadow-sm);
     pointer-events: auto;
   }

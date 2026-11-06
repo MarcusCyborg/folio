@@ -103,7 +103,7 @@ export function getPublicSettings() {
   return publicSettings;
 }
 
-async function loadPublicSettings() {
+export async function loadPublicSettings() {
   try {
     const data = await api('/settings/public');
     if (data) {

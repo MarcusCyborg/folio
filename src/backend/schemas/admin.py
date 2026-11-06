@@ -29,6 +29,13 @@ class DocumentWrite(BaseModel):
     source_license: Optional[str] = Field(None, max_length=255)
     source_attribution: Optional[str] = Field(None, max_length=500)
 
+    @field_validator("title", "content", "summary")
+    @classmethod
+    def validate_non_whitespace(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Field cannot be empty or whitespace only")
+        return v
+
     model_config = ConfigDict(extra="forbid")
 
 class DocumentUpdate(BaseModel):
@@ -43,6 +50,13 @@ class DocumentUpdate(BaseModel):
     source_url: Optional[str] = Field(None, max_length=1000)
     source_license: Optional[str] = Field(None, max_length=255)
     source_attribution: Optional[str] = Field(None, max_length=500)
+
+    @field_validator("title", "content", "summary")
+    @classmethod
+    def validate_non_whitespace(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not v.strip():
+            raise ValueError("Field cannot be empty or whitespace only")
+        return v
 
     model_config = ConfigDict(extra="forbid")
 
@@ -67,7 +81,7 @@ class DocumentStatusUpdate(BaseModel):
 class SEOMetadataUpdate(BaseModel):
     seo_title: Optional[str] = Field(None, max_length=240)
     seo_description: Optional[str] = Field(None, max_length=1000)
-    seo_keywords: Optional[List[str]] = Field(default_factory=list)
+    seo_keywords: Optional[List[str]] = None
     cover_image_alt: Optional[str] = Field(None, max_length=255)
 
     model_config = ConfigDict(extra="forbid")

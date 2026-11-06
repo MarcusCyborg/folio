@@ -27,14 +27,14 @@ def admin_update_document_seo(
         "cover_image_alt": doc.cover_image_alt
     }
 
-    if data.seo_title is not None:
-        doc.seo_title = data.seo_title.strip() if data.seo_title.strip() else None
-    if data.seo_description is not None:
-        doc.seo_description = data.seo_description.strip() if data.seo_description.strip() else None
-    if data.seo_keywords is not None:
-        doc.seo_keywords = data.seo_keywords
-    if data.cover_image_alt is not None:
-        doc.cover_image_alt = data.cover_image_alt.strip() if data.cover_image_alt.strip() else None
+    if "seo_title" in data.model_fields_set:
+        doc.seo_title = data.seo_title.strip() if (data.seo_title and data.seo_title.strip()) else None
+    if "seo_description" in data.model_fields_set:
+        doc.seo_description = data.seo_description.strip() if (data.seo_description and data.seo_description.strip()) else None
+    if "cover_image_alt" in data.model_fields_set:
+        doc.cover_image_alt = data.cover_image_alt.strip() if (data.cover_image_alt and data.cover_image_alt.strip()) else None
+    if "seo_keywords" in data.model_fields_set:
+        doc.seo_keywords = data.seo_keywords if data.seo_keywords is not None else []
 
     doc.updated_at = datetime.now(timezone.utc)
 

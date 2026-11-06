@@ -65,8 +65,11 @@ def get_current_session(
     db: Session = Depends(get_db),
 ):
     """Returns the current session details (authenticated or guest)."""
+    user_self = None
+    if ctx.user and ctx.user.is_active:
+        user_self = user_to_user_self(ctx.user, db)
     return SessionResponse(
-        user=user_to_user_self(ctx.user, db),
+        user=user_self,
         csrf_token=ctx.session.csrf_token,
     )
 

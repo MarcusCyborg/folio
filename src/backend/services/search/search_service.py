@@ -157,19 +157,24 @@ class SearchService:
         date_from_utc: Optional[datetime] = None,
         date_to_utc: Optional[datetime] = None,
         top_k: int = 100,
-    ) -> List[CandidateHit]:
+    ) -> Tuple[List[CandidateHit], int]:
         """Fallback to database ILIKE when inverted index generation is missing or corrupt."""
         q = db.query(Document).filter(
             Document.status == "published",
             Document.deleted_at.is_(None),
         )
 
-        # Keyword matching on title, summary, or content
-        pattern = f"%{query_str}%"
+        # B06: Escape % and _ in query_str to prevent wildcard injection
+        escaped_query = (
+            query_str.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        pattern = f"%{escaped_query}%"
         q = q.filter(
-            (Document.title.ilike(pattern))
-            | (Document.summary.ilike(pattern))
-            | (Document.content.ilike(pattern))
+            (Document.title.ilike(pattern, escape="\\"))
+            | (Document.summary.ilike(pattern, escape="\\"))
+            | (Document.content.ilike(pattern, escape="\\"))
         )
 
         if category_id:
@@ -185,9 +190,11 @@ class SearchService:
         if date_to_utc:
             q = q.filter(Document.created_at <= date_to_utc)
 
+        # EXT-03: Compute total matches count before applying candidate limit
+        total_matches = q.count()
+
         # Stable ordering: newest first, tie-break doc_id ASC
-        q = q.order_by(Document.created_at.desc(), Document.id.asc()).limit(top_k)
-        docs = q.all()
+        docs = q.order_by(Document.created_at.desc(), Document.id.asc()).limit(top_k).all()
 
         hits = []
         for idx, doc in enumerate(docs, start=1):
@@ -200,7 +207,7 @@ class SearchService:
                     title_boost=1.0,
                 )
             )
-        return hits
+        return hits, total_matches
 
     def search(
         self,
@@ -265,6 +272,25 @@ class SearchService:
                     message="Query string must not exceed 200 characters.",
                 )
 
+        # Date range validation (B04: Must execute before any early return)
+        date_from_utc: Optional[datetime] = None
+        date_to_utc: Optional[datetime] = None
+        if date_from is not None and date_to is not None and date_from > date_to:
+            raise AppException(
+                status_code=422,
+                code="INVALID_DATE_RANGE",
+                message="date_from must not be greater than date_to.",
+            )
+
+        if date_from is not None:
+            date_from_utc = datetime(
+                date_from.year, date_from.month, date_from.day, 0, 0, 0, tzinfo=timezone.utc
+            )
+        if date_to is not None:
+            date_to_utc = datetime(
+                date_to.year, date_to.month, date_to.day, 23, 59, 59, 999999, tzinfo=timezone.utc
+            )
+
         # Validate category_id format
         clean_category_id: Optional[str] = None
         if category_id and category_id.strip():
@@ -305,7 +331,8 @@ class SearchService:
         # Validate tag_ids format
         clean_tag_ids: Optional[List[str]] = None
         if tag_ids_raw and tag_ids_raw.strip():
-            raw_tags = [t.strip() for t in tag_ids_raw.split(",") if t.strip()]
+            # B05: Deduplicate tag IDs before length check
+            raw_tags = list(dict.fromkeys([t.strip() for t in tag_ids_raw.split(",") if t.strip()]))
             for t in raw_tags:
                 if not is_valid_uuid(t):
                     raise AppException(
@@ -339,25 +366,6 @@ class SearchService:
                     latency_ms=round((time.perf_counter() - start_time) * 1000, 2),
                 )
             clean_tag_ids = sorted(raw_tags)
-
-        # Date range validation
-        date_from_utc: Optional[datetime] = None
-        date_to_utc: Optional[datetime] = None
-        if date_from is not None and date_to is not None and date_from > date_to:
-            raise AppException(
-                status_code=422,
-                code="INVALID_DATE_RANGE",
-                message="date_from must not be greater than date_to.",
-            )
-
-        if date_from is not None:
-            date_from_utc = datetime(
-                date_from.year, date_from.month, date_from.day, 0, 0, 0, tzinfo=timezone.utc
-            )
-        if date_to is not None:
-            date_to_utc = datetime(
-                date_to.year, date_to.month, date_to.day, 23, 59, 59, 999999, tzinfo=timezone.utc
-            )
 
         filters_hash = compute_filters_hash(
             category_id=clean_category_id,
@@ -420,7 +428,7 @@ class SearchService:
             if mode_cleaned == "bm25":
                 if not active_gen:
                     # Inverted index missing -> Fallback to PostgreSQL ILIKE
-                    hits = self._execute_ilike_fallback(
+                    hits, fallback_total = self._execute_ilike_fallback(
                         db=db,
                         query_str=clean_query,
                         category_id=clean_category_id,
@@ -435,7 +443,7 @@ class SearchService:
                     candidate_ids = [h.doc_id for h in hits]
                     for h in hits:
                         candidate_scores_map[h.doc_id] = h.score
-                    snapshot_total = len(candidate_ids)
+                    snapshot_total = fallback_total
                     snapshot_candidate_count = len(candidate_ids)
                     is_approximate_total = False
                 else:
@@ -458,7 +466,7 @@ class SearchService:
                         is_approximate_total = False
                     except Exception:
                         # Corrupted or unreadable index generation -> Fallback to ILIKE
-                        hits = self._execute_ilike_fallback(
+                        hits, fallback_total = self._execute_ilike_fallback(
                             db=db,
                             query_str=clean_query,
                             category_id=clean_category_id,
@@ -473,7 +481,7 @@ class SearchService:
                         candidate_ids = [h.doc_id for h in hits]
                         for h in hits:
                             candidate_scores_map[h.doc_id] = h.score
-                        snapshot_total = len(candidate_ids)
+                        snapshot_total = fallback_total
                         snapshot_candidate_count = len(candidate_ids)
                         is_approximate_total = False
 
@@ -504,7 +512,7 @@ class SearchService:
                             snapshot_candidate_count = len(candidate_ids)
                             is_approximate_total = False
                         except Exception:
-                            hits = self._execute_ilike_fallback(
+                            hits, fallback_total = self._execute_ilike_fallback(
                                 db, clean_query, clean_category_id, clean_tag_ids, date_from_utc, date_to_utc
                             )
                             engine_used = "ilike_fallback"
@@ -512,11 +520,11 @@ class SearchService:
                             candidate_ids = [h.doc_id for h in hits]
                             for h in hits:
                                 candidate_scores_map[h.doc_id] = h.score
-                            snapshot_total = len(candidate_ids)
+                            snapshot_total = fallback_total
                             snapshot_candidate_count = len(candidate_ids)
                             is_approximate_total = False
                     else:
-                        hits = self._execute_ilike_fallback(
+                        hits, fallback_total = self._execute_ilike_fallback(
                             db, clean_query, clean_category_id, clean_tag_ids, date_from_utc, date_to_utc
                         )
                         engine_used = "ilike_fallback"
@@ -524,7 +532,7 @@ class SearchService:
                         candidate_ids = [h.doc_id for h in hits]
                         for h in hits:
                             candidate_scores_map[h.doc_id] = h.score
-                        snapshot_total = len(candidate_ids)
+                        snapshot_total = fallback_total
                         snapshot_candidate_count = len(candidate_ids)
                         is_approximate_total = False
                 else:
@@ -562,12 +570,12 @@ class SearchService:
                         sres = self.engine.search(sq)
                         bm25_hits = sres.candidates
                     except Exception:
-                        bm25_hits = self._execute_ilike_fallback(
+                        bm25_hits, _ = self._execute_ilike_fallback(
                             db, clean_query, clean_category_id, clean_tag_ids, date_from_utc, date_to_utc
                         )
                         bm25_fell_back_to_ilike = True
                 else:
-                    bm25_hits = self._execute_ilike_fallback(
+                    bm25_hits, _ = self._execute_ilike_fallback(
                         db, clean_query, clean_category_id, clean_tag_ids, date_from_utc, date_to_utc
                     )
                     bm25_fell_back_to_ilike = True

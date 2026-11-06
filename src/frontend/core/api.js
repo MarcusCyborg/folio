@@ -76,6 +76,22 @@ export async function api(path, { method = 'GET', query, body, signal } = {}) {
 
     if (!res.ok) {
       if (isJson && data && data.error) {
+        // AUTH-03: Multi-tab CSRF rotation auto-recovery
+        if (res.status === 403 && data.error.code === 'CSRF_FORBIDDEN' && !arguments[1]?._isCsrfRetry) {
+          try {
+            const sessRes = await fetch(new URL('/api/v1/auth/session', window.location.origin), {
+              credentials: 'same-origin',
+              headers: { 'Accept': 'application/json' },
+            });
+            if (sessRes.ok) {
+              const sessData = await sessRes.json();
+              if (sessData?.csrf_token) {
+                setCsrfToken(sessData.csrf_token);
+                return await api(path, { ...arguments[1], _isCsrfRetry: true });
+              }
+            }
+          } catch (_) {}
+        }
         throw new ApiError(res.status, data.error.code, data.error.message, data.error.fields || {});
       }
       throw new ApiError(res.status, 'HTTP_ERROR', `Request failed with status ${res.status}`);

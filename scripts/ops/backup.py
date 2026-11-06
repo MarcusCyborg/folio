@@ -27,8 +27,32 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from sqlalchemy.engine import make_url
 from src.backend.core.config import settings
 from src.backend.search_index.storage import get_index_storage_root
+
+
+def find_pg_tool(tool_name: str) -> Optional[str]:
+    # 1. Check PATH
+    found = shutil.which(tool_name)
+    if found:
+        return found
+    # 2. Check POSTGRES_BIN_PATH
+    custom_bin = os.environ.get("POSTGRES_BIN_PATH")
+    if custom_bin:
+        cand = Path(custom_bin) / (tool_name + (".exe" if sys.platform == "win32" else ""))
+        if cand.exists():
+            return str(cand)
+    # 3. Known local paths
+    known_paths = [
+        Path("F:/dpl13.10/folio-live-runtime/pgsql/bin") / (tool_name + ".exe"),
+        Path("C:/Program Files/PostgreSQL/16/bin") / (tool_name + ".exe"),
+        Path("/usr/lib/postgresql/16/bin") / tool_name,
+    ]
+    for p in known_paths:
+        if p.exists():
+            return str(p)
+    return None
 
 
 def compute_sha256(file_path: Path) -> str:
@@ -138,8 +162,9 @@ def perform_backup(
                 if parsed_url.password:
                     env["PGPASSWORD"] = parsed_url.password
 
+                pg_dump_bin = find_pg_tool("pg_dump") or "pg_dump"
                 cmd = [
-                    "pg_dump",
+                    pg_dump_bin,
                     "-h", parsed_url.host or "127.0.0.1",
                     "-p", str(parsed_url.port or 5432),
                     "-U", parsed_url.username or "postgres",
@@ -170,7 +195,8 @@ def perform_backup(
                 except Exception as exc:
                     dump_file.write_text(f"-- PostgreSQL connectivity error: {exc}\n")
         else:
-            dump_file.write_text(f"-- PostgreSQL offline during backup run (BLOCKED_ENV)\n-- Target: {target_db_url}\n")
+            safe_target_url = make_url(target_db_url).render_as_string(hide_password=True)
+            dump_file.write_text(f"-- PostgreSQL offline during backup run (BLOCKED_ENV)\n-- Target: {safe_target_url}\n")
 
         db_sha256 = compute_sha256(dump_file)
         rel_dump = dump_file.relative_to(staging_dir).as_posix()

@@ -64,7 +64,7 @@ def list_documents(
     tag_ids: Optional[str] = Query(None, max_length=500),
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
-    sort: str = Query("newest", pattern="^(newest|oldest|title)$"),
+    sort: str = Query("newest", pattern="^(newest|oldest|title|title_asc|title_desc|popular)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     ctx: SessionContext = Depends(get_session_context),

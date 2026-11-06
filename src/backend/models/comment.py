@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import String, Text, DateTime, ForeignKey, UniqueConstraint, Index
+from sqlalchemy import String, Text, DateTime, ForeignKey, UniqueConstraint, Index, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.backend.models.base import Base, utcnow
 
@@ -47,6 +47,14 @@ class Report(Base):
     __table_args__ = (
         Index("ix_reports_status_created", "status", "created_at"),
         Index("ix_reports_comment_reporter", "comment_id", "reporter_id"),
+        Index(
+            "uq_reports_open_comment_reporter",
+            "comment_id",
+            "reporter_id",
+            unique=True,
+            postgresql_where=text("status = 'open'"),
+            sqlite_where=text("status = 'open'"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)

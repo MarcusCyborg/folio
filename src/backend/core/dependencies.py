@@ -39,6 +39,8 @@ def get_session_context(
     if raw_token:
         session_obj = get_session_by_token(db, raw_token)
 
+    # Inactive check deferred to get_current_user to maintain session CSRF validation
+
     if not session_obj:
         session_obj, new_raw_token = create_session(db, user=None)
         db.commit()

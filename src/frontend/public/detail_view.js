@@ -34,6 +34,9 @@ function getSafeHttpUrl(url) {
   if (/^https?:\/\//i.test(trimmed)) {
     return trimmed;
   }
+  if ((trimmed.startsWith('/') || trimmed.startsWith('./')) && !/^[a-z0-9+.-]+:/i.test(trimmed)) {
+    return trimmed;
+  }
   return null;
 }
 
@@ -465,10 +468,10 @@ export async function renderDocumentDetail(container, routeContext) {
           sessionStorage.setItem('folio_last_doc_id', doc.id);
         } catch (_) {}
 
-        if (window.history.length > 1 && (window.history.state?.folioScroll !== undefined || sessionStorage.getItem('folio_library_scroll') !== null)) {
-          e.preventDefault();
-          window.history.back();
-        }
+        e.preventDefault();
+        const lastLibRoute = sessionStorage.getItem('folio_last_library_route') || '#/library';
+        const targetPath = lastLibRoute.startsWith('#') ? lastLibRoute.slice(1) : lastLibRoute;
+        navigate(targetPath.startsWith('/') ? targetPath : `/${targetPath}`);
       };
     }
 
@@ -612,7 +615,12 @@ export async function renderDocumentDetail(container, routeContext) {
           const delBtn = itemEl.querySelector('.delete-comment-btn');
           if (delBtn) {
             delBtn.onclick = async () => {
-              const ok = await confirmAction('Are you sure you want to delete this research note?');
+              const ok = await confirmAction({
+                title: 'Delete Research Note',
+                message: 'Are you sure you want to delete this research note? This action cannot be undone.',
+                confirmLabel: 'Delete Note',
+                destructive: true,
+              });
               if (!ok) return;
               try {
                 await api(`/comments/${c.id}`, { method: 'DELETE' });
@@ -744,9 +752,9 @@ function openInlineCommentEditor(itemEl, comment, docId, onSaved) {
   if (actionsBar) actionsBar.style.display = 'none';
 
   bodyContainer.innerHTML = `
-    <div class="inline-comment-edit-box">
+    <div class="inline-comment-edit-box inline-comment-editor">
       <div class="textarea-mentions-wrapper" style="position: relative;">
-        <textarea class="textarea edit-textarea" rows="3">${escapeText(comment.body)}</textarea>
+        <textarea class="textarea edit-textarea edit-body-textarea" rows="3">${escapeText(comment.body)}</textarea>
       </div>
       <div class="inline-edit-actions" style="margin-top: 0.5rem; display: flex; gap: 0.5rem;">
         <button class="btn btn-primary btn-sm save-edit-btn">Save</button>
@@ -799,7 +807,7 @@ function openInlineCommentEditor(itemEl, comment, docId, onSaved) {
 function openReportDialog(containerEl, commentId) {
   containerEl.innerHTML = `
     <div class="dialog-backdrop" id="reportDialogBackdrop">
-      <div class="dialog-modal" role="dialog" aria-labelledby="reportModalTitle" aria-modal="true">
+      <div class="dialog-modal report-dialog" role="dialog" aria-labelledby="reportModalTitle" aria-modal="true">
         <h3 id="reportModalTitle" class="dialog-title">Report Research Note</h3>
         <p style="color: var(--color-muted); font-size: 0.875rem; margin-bottom: 1rem;">
           Notify library moderators about notes containing harassment, spam, copyright infringement, or invalid research citations.

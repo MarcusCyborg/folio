@@ -96,6 +96,9 @@ def admin_update_user(
 
     if is_active is not None:
         target_user.is_active = is_active
+        # AUTH-02: Ensure sessions from prior to deactivation do not resuscitate after re-enabling
+        if is_active is True and before_state.get("is_active") is False:
+            revoke_user_sessions(db, target_user.id)
 
     target_user.updated_at = datetime.now(timezone.utc)
     write_audit(
