@@ -10,13 +10,13 @@ on:
 jobs:
   backend-and-database:
     name: Backend Tests & Database Verification
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16-alpine
         env:
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgrespassword
+          POSTGRES_PASSWORD: FolioCiDb_16_Only_7Qw8Er9Ty
           POSTGRES_DB: folio
         options: >-
           --health-cmd pg_isready
@@ -50,10 +50,18 @@ jobs:
         env:
           POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgrespassword
+          POSTGRES_PASSWORD: FolioCiDb_16_Only_7Qw8Er9Ty
         run: |
           source venv/bin/activate
           python scripts/configure_ci_database.py
+
+      - name: Install PostgreSQL 16 client tools for backup and restore
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-16
+          echo "POSTGRES_BIN_PATH=/usr/lib/postgresql/16/bin" >> "$GITHUB_ENV"
+          /usr/lib/postgresql/16/bin/pg_dump --version
+          /usr/lib/postgresql/16/bin/psql --version
 
       - name: Verify migration on clean database
         run: |
@@ -86,13 +94,13 @@ jobs:
 
   frontend-e2e:
     name: Frontend E2E & Browser Verification
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16-alpine
         env:
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgrespassword
+          POSTGRES_PASSWORD: FolioCiDb_16_Only_7Qw8Er9Ty
           POSTGRES_DB: folio
         options: >-
           --health-cmd pg_isready
@@ -126,7 +134,7 @@ jobs:
         env:
           POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgrespassword
+          POSTGRES_PASSWORD: FolioCiDb_16_Only_7Qw8Er9Ty
         run: |
           source venv/bin/activate
           python scripts/configure_ci_database.py

@@ -52,11 +52,8 @@ def frontend_server():
 
 
 @pytest.fixture(scope="module")
-def playwright_instance():
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        yield browser
-        browser.close()
+def playwright_instance(browser_instance):
+    yield browser_instance
 
 
 def setup_mock_api(page, *, simulate_like_fail=False, allow_expected_500=False):

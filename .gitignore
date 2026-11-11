@@ -16,6 +16,11 @@ pipeline_status.txt
 *.py[cod]
 *$py.class
 .env
+.env.local
+.env.production
+.env.production.*
+.env.restored
+docker/proxy/certs/
 .pytest_cache/
 *.log
 .pgsql/
@@ -24,3 +29,6 @@ pipeline_status.txt
 
 screenshots/
 test-results/
+
+backups/
+test-runtime/

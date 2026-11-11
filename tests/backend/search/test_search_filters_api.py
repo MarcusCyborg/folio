@@ -101,3 +101,41 @@ def test_date_range_filters(client: TestClient, db_session: Session):
     if min_date < max_date:
         assert inv_res.status_code == 422
         assert "INVALID_DATE_RANGE" in inv_res.text
+
+
+def test_r06_unknown_taxonomy_validates_all_params_and_persists_pagination_context(client: TestClient, db_session: Session):
+    """
+    R06 / B04:
+    1. Unknown valid category_id combined with malformed tag_ids must still raise 422 INVALID_TAG_ID.
+    2. Unknown valid category_id / tag_ids persists a real SearchContext + InteractionLog so
+       page=2 with search_context_token succeeds with 200 OK instead of 404.
+    """
+    from src.backend.models.event import InteractionLog
+
+    unknown_cat = str(uuid.uuid4())
+    res_invalid = client.get(f"/api/v1/search?q=neural&category_id={unknown_cat}&tag_ids=not-a-uuid")
+    assert res_invalid.status_code == 422
+    assert res_invalid.json()["error"]["code"] == "INVALID_TAG_ID"
+
+    res_p1 = client.get(f"/api/v1/search?q=neural&category_id={unknown_cat}&page=1&page_size=20")
+    assert res_p1.status_code == 200
+    d1 = res_p1.json()
+    assert d1["items"] == []
+    assert d1["snapshot_total"] == 0
+    assert d1["has_more"] is False
+    assert d1["index_generation"] == "none"
+
+    # Real InteractionLog persisted
+    log_row = db_session.query(InteractionLog).filter(InteractionLog.id == d1["search_event_id"]).first()
+    assert log_row is not None
+
+    # Subsequent page with search_context_token succeeds with 200 OK
+    token = d1["search_context_token"]
+    res_p2 = client.get(
+        f"/api/v1/search?q=neural&category_id={unknown_cat}&page=2&page_size=20&search_context_token={token}"
+    )
+    assert res_p2.status_code == 200
+    d2 = res_p2.json()
+    assert d2["items"] == []
+    assert d2["snapshot_total"] == 0
+    assert d2["has_more"] is False

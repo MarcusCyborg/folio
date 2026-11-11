@@ -10,6 +10,8 @@ export function attachMentionsAutocomplete(textarea, wrapperElement) {
   let debounceTimer = null;
   let activeQuery = '';
   let matchStartIndex = -1;
+  let currentAbortController = null;
+  let requestSequence = 0;
 
   function createPopup() {
     if (popupEl) return popupEl;
@@ -68,10 +70,31 @@ export function attachMentionsAutocomplete(textarea, wrapperElement) {
     popupEl.style.display = 'block';
   }
 
+  function getLiveMentionContext() {
+    const cursorPos = textarea.selectionStart;
+    if (typeof cursorPos !== 'number' || textarea.selectionEnd !== cursorPos) {
+      return null;
+    }
+    const textBeforeCursor = textarea.value.slice(0, cursorPos);
+    const match = textBeforeCursor.match(/@([a-z0-9_]{2,30})$/i);
+    if (!match) {
+      return null;
+    }
+    return {
+      query: match[1],
+      startIndex: cursorPos - match[0].length,
+      cursorPos,
+    };
+  }
+
   function selectUser(user) {
-    if (matchStartIndex < 0) return;
+    const live = getLiveMentionContext();
+    if (!live || live.query !== activeQuery || live.startIndex !== matchStartIndex) {
+      hidePopup();
+      return;
+    }
     const text = textarea.value;
-    const before = text.slice(0, matchStartIndex);
+    const before = text.slice(0, live.startIndex);
     const after = text.slice(textarea.selectionEnd);
     const insertText = `@${user.username} `;
     
@@ -81,52 +104,103 @@ export function attachMentionsAutocomplete(textarea, wrapperElement) {
     textarea.selectionEnd = newCursorPos;
     textarea.focus();
 
+    hidePopup();
+
     // Trigger input event for any validation listeners
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
-
-    hidePopup();
   }
 
-  async function checkMentionsQuery() {
-    const cursorPos = textarea.selectionStart;
-    const textBeforeCursor = textarea.value.slice(0, cursorPos);
-
-    // Look for @username query pattern before cursor
-    const match = textBeforeCursor.match(/@([a-z0-9_]{2,30})$/i);
-    if (!match) {
+  async function checkMentionsQuery(expectedSeq) {
+    const live = getLiveMentionContext();
+    if (!live) {
       hidePopup();
       return;
     }
 
-    activeQuery = match[1];
-    matchStartIndex = cursorPos - match[0].length;
+    activeQuery = live.query;
+    matchStartIndex = live.startIndex;
+    const querySnapshot = activeQuery;
+    const startSnapshot = matchStartIndex;
+    const seq = expectedSeq || ++requestSequence;
+
+    if (currentAbortController) {
+      currentAbortController.abort();
+    }
+    currentAbortController = new AbortController();
 
     try {
       const users = await api('/users/mentions', {
-        query: { q: activeQuery, page: 1, page_size: 5 },
+        query: { q: querySnapshot, page: 1, page_size: 5 },
+        signal: currentAbortController.signal,
       });
+
+      const currentLive = getLiveMentionContext();
+      if (
+        seq !== requestSequence ||
+        !currentLive ||
+        currentLive.query !== querySnapshot ||
+        currentLive.startIndex !== startSnapshot
+      ) {
+        hidePopup();
+        return;
+      }
 
       if (!Array.isArray(users) || users.length === 0) {
         hidePopup();
         return;
       }
 
+      activeQuery = querySnapshot;
+      matchStartIndex = startSnapshot;
       currentMatches = users;
       selectedIndex = 0;
       renderMatches();
     } catch (err) {
-      // Mentions lookup requires authentication or may fail gracefully
-      hidePopup();
+      if (err.name === 'AbortError') return;
+      if (seq === requestSequence) {
+        hidePopup();
+      }
     }
   }
 
   function onInput() {
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(checkMentionsQuery, 150);
+    const seq = ++requestSequence;
+    if (currentAbortController) {
+      currentAbortController.abort();
+      currentAbortController = null;
+    }
+
+    const live = getLiveMentionContext();
+    if (!live) {
+      hidePopup();
+      return;
+    }
+    if (live.query !== activeQuery || live.startIndex !== matchStartIndex) {
+      hidePopup();
+    }
+
+    debounceTimer = setTimeout(() => {
+      checkMentionsQuery(seq);
+    }, 150);
+  }
+
+  function onCursorSync() {
+    if (!popupEl || popupEl.style.display === 'none') return;
+    const live = getLiveMentionContext();
+    if (!live || live.query !== activeQuery || live.startIndex !== matchStartIndex) {
+      hidePopup();
+    }
   }
 
   function onKeyDown(e) {
     if (!popupEl || popupEl.style.display === 'none' || currentMatches.length === 0) {
+      return;
+    }
+
+    const live = getLiveMentionContext();
+    if (!live || live.query !== activeQuery || live.startIndex !== matchStartIndex) {
+      hidePopup();
       return;
     }
 
@@ -155,12 +229,17 @@ export function attachMentionsAutocomplete(textarea, wrapperElement) {
   }
 
   textarea.addEventListener('input', onInput);
+  textarea.addEventListener('keyup', onCursorSync);
+  textarea.addEventListener('click', onCursorSync);
   textarea.addEventListener('keydown', onKeyDown);
   textarea.addEventListener('blur', onBlur);
 
   return function cleanup() {
     clearTimeout(debounceTimer);
+    if (currentAbortController) currentAbortController.abort();
     textarea.removeEventListener('input', onInput);
+    textarea.removeEventListener('keyup', onCursorSync);
+    textarea.removeEventListener('click', onCursorSync);
     textarea.removeEventListener('keydown', onKeyDown);
     textarea.removeEventListener('blur', onBlur);
     if (popupEl && popupEl.parentNode) {

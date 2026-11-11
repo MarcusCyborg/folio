@@ -127,11 +127,32 @@ def list_published_documents(
             dt_to = datetime.combine(date_to, datetime.max.time(), tzinfo=timezone.utc)
             query = query.filter(Document.created_at <= dt_to)
 
-    # Ordering with stable tie-breaker
+    # Ordering with stable tie-breaker (R04 / F03: support newest, oldest, title/title_asc, title_desc, popular)
     if sort == "oldest":
         query = query.order_by(Document.created_at.asc(), Document.id.asc())
-    elif sort == "title":
-        query = query.order_by(Document.title.asc(), Document.id.asc())
+    elif sort in ("title", "title_asc"):
+        query = query.order_by(func.lower(Document.title).asc(), Document.title.asc(), Document.id.asc())
+    elif sort == "title_desc":
+        query = query.order_by(func.lower(Document.title).desc(), Document.title.desc(), Document.id.asc())
+    elif sort == "popular":
+        likes_subq = (
+            db.query(
+                DocumentLike.document_id.label("doc_id"),
+                func.count(DocumentLike.id).label("likes_cnt"),
+            )
+            .group_by(DocumentLike.document_id)
+            .subquery()
+        )
+        likes_expr = func.coalesce(likes_subq.c.likes_cnt, 0)
+        views_expr = func.coalesce(Document.views_count, 0)
+        popularity_expr = (likes_expr * 3) + views_expr
+        query = query.outerjoin(likes_subq, Document.id == likes_subq.c.doc_id).order_by(
+            popularity_expr.desc(),
+            likes_expr.desc(),
+            views_expr.desc(),
+            Document.created_at.desc(),
+            Document.id.asc(),
+        )
     else:  # newest
         query = query.order_by(Document.created_at.desc(), Document.id.desc())
 

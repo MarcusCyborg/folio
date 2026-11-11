@@ -713,3 +713,63 @@ def test_markdown_sanitization_and_malformed_inputs(client, db_session):
         headers={"X-CSRF-Token": csrf},
         json={"reason": "spam", "unauthorized_extra": "value"}
     ).status_code == 422
+
+
+def test_r04_catalog_sort_options_order_correctly(client, db_session):
+    """R04 / F03: Verify oldest, title, title_asc, title_desc, popular, and newest sort orders."""
+    cat = Category(name="Sort Test Cat", slug=f"sort-test-{uuid.uuid4().hex[:8]}")
+    db_session.add(cat)
+    db_session.flush()
+
+    base_time = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
+    doc_alpha = Document(
+        title="Alpha Foundation",
+        summary="Alpha summary",
+        content="Alpha content",
+        category_id=cat.id,
+        status="published",
+        views_count=10,
+        created_at=base_time,
+        published_at=base_time,
+    )
+    doc_beta = Document(
+        title="beta middle",
+        summary="Beta summary",
+        content="Beta content",
+        category_id=cat.id,
+        status="published",
+        views_count=500,
+        created_at=base_time + timedelta(days=1),
+        published_at=base_time + timedelta(days=1),
+    )
+    doc_gamma = Document(
+        title="Gamma Latest",
+        summary="Gamma summary",
+        content="Gamma content",
+        category_id=cat.id,
+        status="published",
+        views_count=50,
+        created_at=base_time + timedelta(days=2),
+        published_at=base_time + timedelta(days=2),
+    )
+    db_session.add_all([doc_alpha, doc_beta, doc_gamma])
+    db_session.flush()
+
+    # Add likes to doc_beta so it is unambiguously most popular
+    users = db_session.query(User).limit(2).all()
+    for u in users:
+        db_session.add(DocumentLike(document_id=doc_beta.id, user_id=u.id))
+    db_session.commit()
+
+    def fetch_titles(sort_key: str):
+        r = client.get(f"/api/v1/documents?category_id={cat.id}&sort={sort_key}&page=1&page_size=10")
+        assert r.status_code == 200
+        return [item["title"] for item in r.json()["items"]]
+
+    assert fetch_titles("newest") == ["Gamma Latest", "beta middle", "Alpha Foundation"]
+    assert fetch_titles("oldest") == ["Alpha Foundation", "beta middle", "Gamma Latest"]
+    assert fetch_titles("title") == ["Alpha Foundation", "beta middle", "Gamma Latest"]
+    assert fetch_titles("title_asc") == ["Alpha Foundation", "beta middle", "Gamma Latest"]
+    assert fetch_titles("title_desc") == ["Gamma Latest", "beta middle", "Alpha Foundation"]
+    assert fetch_titles("popular")[0] == "beta middle"
+    assert fetch_titles("popular") == ["beta middle", "Gamma Latest", "Alpha Foundation"]

@@ -1,12 +1,66 @@
-version: '3.8'
-
 # ==============================================================================
-# Folio Production / Staging-like Docker Compose Architecture
+# Folio Production / Staging Docker Compose Architecture
 # Multi-container topology with network isolation, healthcheck dependencies,
-# non-root workers, and zero exposed backend ports.
+# TLS certificate preflight, non-root workers, and zero exposed backend ports.
+#
+# Always pass the env file explicitly for both interpolation and container env:
+#   docker compose --env-file .env.production -f docker-compose.prod.yml <command>
 # ==============================================================================
 
 services:
+  # ----------------------------------------------------------------------------
+  # 0a. One-Shot Reverse Proxy TLS Certificate Initializer / Importer
+  # Usage:
+  #   Local/Staging self-signed:
+  #     docker compose --env-file .env.production -f docker-compose.prod.yml run --rm cert-init
+  #   Production CA cert import:
+  #     docker compose --env-file .env.production -f docker-compose.prod.yml run --rm \
+  #       -v /path/to/readable-certs:/import:ro cert-init \
+  #       --import-cert /import/fullchain.pem --import-key /import/privkey.pem \
+  #       --expected-domain "${DOMAIN_NAME}"
+  # ----------------------------------------------------------------------------
+  cert-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles:
+      - tools
+    restart: "no"
+    entrypoint: ["python3", "scripts/ops/init_certs.py"]
+    networks:
+      - backend-net
+    volumes:
+      - folio-proxy-certs:/app/certs
+    environment:
+      CERT_DIR: /app/certs
+      DOMAIN_NAME: ${DOMAIN_NAME:-localhost}
+      STAGING_DOMAIN: ${STAGING_DOMAIN:-staging.localhost}
+      CERT_EXPECTED_DOMAIN: ${CERT_EXPECTED_DOMAIN:-}
+
+  # ----------------------------------------------------------------------------
+  # 0b. Reverse Proxy TLS Certificate Preflight Check (Runs before proxy starts)
+  # Fails clearly if folio.crt or folio.key is missing, expired, mismatched, or wrong domain.
+  # ----------------------------------------------------------------------------
+  cert-preflight:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: "no"
+    entrypoint: ["python3", "scripts/ops/init_certs.py"]
+    command:
+      - "--check-only"
+      - "--expected-domain"
+      - "${CERT_EXPECTED_DOMAIN:-${DOMAIN_NAME:-localhost}}"
+    networks:
+      - backend-net
+    volumes:
+      - folio-proxy-certs:/app/certs:ro
+    environment:
+      CERT_DIR: /app/certs
+      DOMAIN_NAME: ${DOMAIN_NAME:-localhost}
+      STAGING_DOMAIN: ${STAGING_DOMAIN:-staging.localhost}
+      CERT_EXPECTED_DOMAIN: ${CERT_EXPECTED_DOMAIN:-}
+
   # ----------------------------------------------------------------------------
   # 1. Reverse Proxy (Nginx with HTTPS, security headers & HTTP->HTTPS redirect)
   # Only service with public ports exposed to the host/internet.
@@ -31,10 +85,12 @@ services:
     depends_on:
       web:
         condition: service_healthy
+      cert-preflight:
+        condition: service_completed_successfully
 
   # ----------------------------------------------------------------------------
   # 2. Web Application Service (FastAPI ASGI under Uvicorn)
-  # Internal network only; non-root user 'folio'; persists shared index data.
+  # Internal network only; non-root user 'folio'; persists shared index & media.
   # ----------------------------------------------------------------------------
   web:
     build:
@@ -48,17 +104,28 @@ services:
     volumes:
       - folio-index-data:/app/data/search_index
       - folio-media-data:/app/data/media
+      - ./backups:/app/backups
     environment:
       APP_ENV: ${APP_ENV:-production}
-      APP_SECRET: ${APP_SECRET}
+      APP_SECRET: ${APP_SECRET:?APP_SECRET must be set and non-empty in env file}
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-folio_prod_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-folio}}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://${DOMAIN_NAME:-localhost}}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-127.0.0.1,::1,172.16.0.0/12,10.0.0.0/8}
-      INDEX_STORAGE_DIR: /app/data/search_index/generations
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      SEARCH_CONTEXT_TTL_MINUTES: ${SEARCH_CONTEXT_TTL_MINUTES:-15}
+      SEARCH_TIMEOUT_SECONDS: ${SEARCH_TIMEOUT_SECONDS:-5.0}
+      SEMANTIC_EXECUTOR_WORKERS: ${SEMANTIC_EXECUTOR_WORKERS:-2}
+      SEMANTIC_MAX_PENDING: ${SEMANTIC_MAX_PENDING:-2}
+      INDEX_STORAGE_DIR: ${INDEX_STORAGE_DIR:-/app/data/search_index/generations}
+      MEDIA_DIR: ${MEDIA_DIR:-/app/data/media}
       ENABLE_LEGACY_SEARCH: ${ENABLE_LEGACY_SEARCH:-false}
-      CHROMA_PATH: /app/data/vector
+      CHROMA_PATH: ${CHROMA_PATH:-/app/data/vector}
+      CHROMA_HOST: ${CHROMA_HOST:-}
+      CHROMA_PORT: ${CHROMA_PORT:-8000}
+      CHROMA_COLLECTION_NAME: ${CHROMA_COLLECTION_NAME:-wiki_ai_english}
+      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:-all-MiniLM-L6-v2}
     depends_on:
       db:
         condition: service_healthy
@@ -85,11 +152,19 @@ services:
     volumes:
       - folio-index-data:/app/data/search_index
       - folio-media-data:/app/data/media
+      - ./backups:/app/backups
     environment:
       APP_ENV: ${APP_ENV:-production}
-      APP_SECRET: ${APP_SECRET}
+      APP_SECRET: ${APP_SECRET:?APP_SECRET must be set and non-empty in env file}
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-folio_prod_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-folio}}
-      INDEX_STORAGE_DIR: /app/data/search_index/generations
+      INDEX_STORAGE_DIR: ${INDEX_STORAGE_DIR:-/app/data/search_index/generations}
+      MEDIA_DIR: ${MEDIA_DIR:-/app/data/media}
+      SEARCH_TIMEOUT_SECONDS: ${SEARCH_TIMEOUT_SECONDS:-5.0}
+      CHROMA_PATH: ${CHROMA_PATH:-/app/data/vector}
+      CHROMA_HOST: ${CHROMA_HOST:-}
+      CHROMA_PORT: ${CHROMA_PORT:-8000}
+      CHROMA_COLLECTION_NAME: ${CHROMA_COLLECTION_NAME:-wiki_ai_english}
+      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:-all-MiniLM-L6-v2}
       WORKER_POLL_INTERVAL: ${WORKER_POLL_INTERVAL:-1.0}
       WORKER_BATCH_SIZE: ${WORKER_BATCH_SIZE:-10}
     depends_on:
@@ -109,7 +184,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-folio}
       POSTGRES_USER: ${POSTGRES_USER:-folio_prod_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set and non-empty in env file}
     volumes:
       - folio-pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -138,7 +213,8 @@ services:
 
   # ----------------------------------------------------------------------------
   # 6. Database Migration & Provisioning Runner (One-Shot Tool)
-  # Activated on-demand via: docker compose -f docker-compose.prod.yml run --rm migration
+  # Usage:
+  #   docker compose --env-file .env.production -f docker-compose.prod.yml run --rm migration
   # ----------------------------------------------------------------------------
   migration:
     build:
@@ -153,12 +229,66 @@ services:
       - backend-net
     volumes:
       - folio-index-data:/app/data/search_index
+      - folio-media-data:/app/data/media
+      - ./backups:/app/backups
     environment:
       APP_ENV: ${APP_ENV:-production}
-      APP_SECRET: ${APP_SECRET}
+      APP_SECRET: ${APP_SECRET:?APP_SECRET must be set and non-empty in env file}
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-folio_prod_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-folio}}
+      INDEX_STORAGE_DIR: ${INDEX_STORAGE_DIR:-/app/data/search_index/generations}
+      MEDIA_DIR: ${MEDIA_DIR:-/app/data/media}
       ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-admin@folio.example.com}
       ADMIN_BOOTSTRAP_USERNAME: ${ADMIN_BOOTSTRAP_USERNAME:-superadmin}
+      ADMIN_BOOTSTRAP_DISPLAY_NAME: ${ADMIN_BOOTSTRAP_DISPLAY_NAME:-Super Administrator}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ----------------------------------------------------------------------------
+  # 7. Operations Runner (Backup, Restore, Drill, Bootstrap Admin, Index CLI)
+  # Shares identical storage mounts and internal DB network as web/worker.
+  # Usage:
+  #   docker compose --env-file .env.production -f docker-compose.prod.yml run --rm ops scripts/ops/backup.py -o /app/backups
+  # ----------------------------------------------------------------------------
+  ops:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles:
+      - tools
+    restart: "no"
+    entrypoint: ["python3"]
+    networks:
+      - backend-net
+    volumes:
+      - folio-index-data:/app/data/search_index
+      - folio-media-data:/app/data/media
+      - ./backups:/app/backups
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      APP_SECRET: ${APP_SECRET:?APP_SECRET must be set and non-empty in env file}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-folio_prod_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-folio}}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://${DOMAIN_NAME:-localhost}}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-127.0.0.1,::1,172.16.0.0/12,10.0.0.0/8}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      SEARCH_CONTEXT_TTL_MINUTES: ${SEARCH_CONTEXT_TTL_MINUTES:-15}
+      SEARCH_TIMEOUT_SECONDS: ${SEARCH_TIMEOUT_SECONDS:-5.0}
+      SEMANTIC_EXECUTOR_WORKERS: ${SEMANTIC_EXECUTOR_WORKERS:-2}
+      SEMANTIC_MAX_PENDING: ${SEMANTIC_MAX_PENDING:-2}
+      INDEX_STORAGE_DIR: ${INDEX_STORAGE_DIR:-/app/data/search_index/generations}
+      MEDIA_DIR: ${MEDIA_DIR:-/app/data/media}
+      ENABLE_LEGACY_SEARCH: ${ENABLE_LEGACY_SEARCH:-false}
+      CHROMA_PATH: ${CHROMA_PATH:-/app/data/vector}
+      CHROMA_HOST: ${CHROMA_HOST:-}
+      CHROMA_PORT: ${CHROMA_PORT:-8000}
+      CHROMA_COLLECTION_NAME: ${CHROMA_COLLECTION_NAME:-wiki_ai_english}
+      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:-all-MiniLM-L6-v2}
+      ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-admin@folio.example.com}
+      ADMIN_BOOTSTRAP_USERNAME: ${ADMIN_BOOTSTRAP_USERNAME:-superadmin}
+      ADMIN_BOOTSTRAP_DISPLAY_NAME: ${ADMIN_BOOTSTRAP_DISPLAY_NAME:-Super Administrator}
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
     depends_on:
       db:
@@ -166,15 +296,15 @@ services:
 
 volumes:
   folio-pgdata:
-    name: folio-pgdata
+    name: ${FOLIO_PGDATA_VOLUME:-folio-pgdata}
   folio-index-data:
-    name: folio-index-data
+    name: ${FOLIO_INDEX_VOLUME:-folio-index-data}
   folio-media-data:
-    name: folio-media-data
+    name: ${FOLIO_MEDIA_VOLUME:-folio-media-data}
   folio-chroma-data:
-    name: folio-chroma-data
+    name: ${FOLIO_CHROMA_VOLUME:-folio-chroma-data}
   folio-proxy-certs:
-    name: folio-proxy-certs
+    name: ${FOLIO_CERTS_VOLUME:-folio-proxy-certs}
 
 networks:
   frontend-net:

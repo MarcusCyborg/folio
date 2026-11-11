@@ -223,3 +223,229 @@ def test_ib_r05_dynamic_git_sha_and_latency_boundaries():
     assert "semantic_model_latency" in boundaries_blocked
     assert boundaries_blocked["semantic_model_latency"]["status"] == "BLOCKED_ENV"
     assert boundaries_blocked["semantic_model_latency"]["included_in_measured_latency"] is False
+
+
+def test_ext02_corpus_provenance_digest_and_generation_metadata(db_session, tmp_path):
+    """
+    EXT-02:
+    Evaluation reports must record corpus_id, deterministic corpus_digest_sha256,
+    active_index_generation provenance, and corpus_db_alignment status.
+    """
+    from evaluate.run_eval import compute_corpus_digest_sha256, run_evaluation
+    from src.backend.search_index.manager import GenerationManager
+
+    gen = GenerationManager.build_new_generation(db_session, force=True)
+
+    manifest_path = Path("evaluate/corpus_manifest.json")
+    queries_path = Path("evaluate/benchmark_queries.json")
+    qrels_path = Path("evaluate/qrels.json")
+
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    expected_digest = compute_corpus_digest_sha256(manifest)
+    assert len(expected_digest) == 64
+
+    payload = run_evaluation(
+        manifest_path=manifest_path,
+        queries_path=queries_path,
+        qrels_path=qrels_path,
+        output_dir=tmp_path,
+        split="test",
+        k=5,
+        run_benchmarks=False,
+        selected_engines=["bm25"],
+        db=db_session,
+    )
+
+    meta = payload["evaluation_metadata"]
+    assert meta["corpus_id"] == "folio-canonical-corpus-v1"
+    assert meta["corpus_digest_sha256"] == expected_digest
+    assert meta["active_index_generation"] == gen.id
+    assert meta["active_index_generation_num"] == gen.generation_num
+    assert meta["corpus_db_alignment"] == "MATCH"
+    assert (tmp_path / "eval_results_p06.json").exists()
+
+
+def test_r3_05_execute_ilike_unpacks_tuple_and_returns_ranked_hits(db_session):
+    """R3-05: RetrievalEvaluator.execute_ilike must unpack (hits, total_matches) cleanly."""
+    evaluator = RetrievalEvaluator(db_session)
+    doc_ids, scores, elapsed_ms, engine_used, is_degraded, degraded_reason = evaluator.execute_ilike(
+        "Deep learning", top_k=5
+    )
+    assert engine_used == "ilike_baseline"
+    assert is_degraded is False
+    assert degraded_reason is None
+    assert elapsed_ms >= 0.0
+    assert len(doc_ids) >= 1
+    assert all(did in scores for did in doc_ids)
+
+
+def test_r3_05_corpus_db_alignment_detects_swapped_ids_content_drift_and_tampered_manifest(db_session, tmp_path):
+    """
+    R3-05:
+    corpus_db_alignment must perform order-independent verification of published document IDs,
+    non-deleted status, canonical titles, and content/summary SHA-256 digests against PostgreSQL
+    rather than comparing counts alone. Official evaluation must refuse mismatched corpora unless
+    explicitly overridden as INVALID_MISMATCH.
+    """
+    import copy
+    import uuid
+    from datetime import datetime, timezone
+    from evaluate.run_eval import CorpusAlignmentError, run_evaluation
+    from src.backend.models.document import Document
+    from src.backend.models.taxonomy import Category
+    from src.backend.search_index.manager import GenerationManager
+
+    GenerationManager.build_new_generation(db_session, force=True)
+
+    manifest_path = Path("evaluate/corpus_manifest.json")
+    queries_path = Path("evaluate/benchmark_queries.json")
+    qrels_path = Path("evaluate/qrels.json")
+    base_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    # 1. Reordered manifest documents (same IDs/hashes/statuses, shuffled order) -> MUST still MATCH
+    reordered_manifest = copy.deepcopy(base_manifest)
+    reordered_manifest["documents"] = list(reversed(reordered_manifest["documents"]))
+    reordered_path = tmp_path / "manifest_reordered.json"
+    reordered_path.write_text(json.dumps(reordered_manifest), encoding="utf-8")
+
+    ok_payload = run_evaluation(
+        manifest_path=reordered_path,
+        queries_path=queries_path,
+        qrels_path=qrels_path,
+        output_dir=tmp_path / "out_ok",
+        split="test",
+        k=5,
+        run_benchmarks=False,
+        selected_engines=["ilike"],
+        db=db_session,
+    )
+    assert ok_payload["evaluation_metadata"]["corpus_db_alignment"] == "MATCH"
+    assert ok_payload["evaluation_metadata"]["verification_status"] == "VERIFIED_MATCH"
+
+    # 2. Tampered manifest content_sha256 (same count=100) -> MUST block by default & flag INVALID_MISMATCH on override
+    tampered_manifest = copy.deepcopy(base_manifest)
+    pub_entry = next(d for d in tampered_manifest["documents"] if d["status"] == "published")
+    pub_entry["content_sha256"] = "0" * 64
+    tampered_path = tmp_path / "manifest_tampered.json"
+    tampered_path.write_text(json.dumps(tampered_manifest), encoding="utf-8")
+
+    with pytest.raises(CorpusAlignmentError):
+        run_evaluation(
+            manifest_path=tampered_path,
+            queries_path=queries_path,
+            qrels_path=qrels_path,
+            output_dir=tmp_path / "out_tampered_blocked",
+            split="test",
+            k=5,
+            run_benchmarks=False,
+            selected_engines=["bm25"],
+            db=db_session,
+        )
+
+    tampered_diag = run_evaluation(
+        manifest_path=tampered_path,
+        queries_path=queries_path,
+        qrels_path=qrels_path,
+        output_dir=tmp_path / "out_tampered_diag",
+        split="test",
+        k=5,
+        run_benchmarks=False,
+        selected_engines=["bm25"],
+        db=db_session,
+        allow_corpus_mismatch=True,
+    )
+    assert tampered_diag["evaluation_metadata"]["corpus_db_alignment"] == "MISMATCH"
+    assert tampered_diag["evaluation_metadata"]["verification_status"] == "INVALID_MISMATCH"
+    assert pub_entry["id"] in tampered_diag["evaluation_metadata"]["alignment_details"]["content_mismatches"]
+
+    # 3. DB published count stays IDENTICAL (100), but one published doc is soft-deleted
+    #    and replaced by a newly inserted published doc (same total count, different IDs!)
+    victim_id = pub_entry["id"]
+    victim = db_session.query(Document).filter(Document.id == victim_id).first()
+    cat = db_session.query(Category).first()
+    now = datetime.now(timezone.utc)
+    victim.deleted_at = now
+    replacement_id = str(uuid.uuid4())
+    db_session.add(
+        Document(
+            id=replacement_id,
+            title="Replacement Doc Same Total Count",
+            summary="Injected to keep published count == 100",
+            content="Replacement corpus drift test document",
+            category_id=cat.id,
+            status="published",
+            created_at=now,
+            published_at=now,
+        )
+    )
+    db_session.flush()
+
+    with pytest.raises(CorpusAlignmentError):
+        run_evaluation(
+            manifest_path=manifest_path,
+            queries_path=queries_path,
+            qrels_path=qrels_path,
+            output_dir=tmp_path / "out_swap_blocked",
+            split="test",
+            k=5,
+            run_benchmarks=False,
+            selected_engines=["bm25"],
+            db=db_session,
+        )
+
+    swap_diag = run_evaluation(
+        manifest_path=manifest_path,
+        queries_path=queries_path,
+        qrels_path=qrels_path,
+        output_dir=tmp_path / "out_swap_diag",
+        split="test",
+        k=5,
+        run_benchmarks=False,
+        selected_engines=["bm25"],
+        db=db_session,
+        allow_corpus_mismatch=True,
+    )
+    meta_swap = swap_diag["evaluation_metadata"]
+    assert meta_swap["db_published_documents"] == 100
+    assert meta_swap["corpus_db_alignment"] == "MISMATCH"
+    assert meta_swap["verification_status"] == "INVALID_MISMATCH"
+    assert victim_id in meta_swap["alignment_details"]["missing_published_ids"]
+    assert replacement_id in meta_swap["alignment_details"]["extra_published_ids"]
+
+    # Restore victim & remove replacement, then alter only content on victim (exact same IDs & counts!)
+    db_session.query(Document).filter(Document.id == replacement_id).delete(synchronize_session=False)
+    victim.deleted_at = None
+    orig_content = victim.content
+    victim.content = orig_content + "\n\nDrifted DB content not in manifest."
+    db_session.flush()
+
+    with pytest.raises(CorpusAlignmentError):
+        run_evaluation(
+            manifest_path=manifest_path,
+            queries_path=queries_path,
+            qrels_path=qrels_path,
+            output_dir=tmp_path / "out_drift_blocked",
+            split="test",
+            k=5,
+            run_benchmarks=False,
+            selected_engines=["bm25"],
+            db=db_session,
+        )
+
+    drift_diag = run_evaluation(
+        manifest_path=manifest_path,
+        queries_path=queries_path,
+        qrels_path=qrels_path,
+        output_dir=tmp_path / "out_drift_diag",
+        split="test",
+        k=5,
+        run_benchmarks=False,
+        selected_engines=["bm25"],
+        db=db_session,
+        allow_corpus_mismatch=True,
+    )
+    assert drift_diag["evaluation_metadata"]["corpus_db_alignment"] == "MISMATCH"
+    assert drift_diag["evaluation_metadata"]["verification_status"] == "INVALID_MISMATCH"
+    assert victim_id in drift_diag["evaluation_metadata"]["alignment_details"]["content_mismatches"]

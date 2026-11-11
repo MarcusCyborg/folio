@@ -214,21 +214,6 @@ export async function renderRegister(container, routeContext) {
   const submitBtn = container.querySelector('#registerSubmitBtn');
   const disabledNotice = container.querySelector('#regDisabledNotice');
 
-  // Check registration_enabled setting
-  try {
-    const settings = await api('/settings/public');
-    if (settings && settings.registration_enabled === false) {
-      disabledNotice.style.display = 'block';
-      submitBtn.disabled = true;
-      emailInput.disabled = true;
-      usernameInput.disabled = true;
-      displayInput.disabled = true;
-      passwordInput.disabled = true;
-    }
-  } catch (err) {
-    console.warn('Could not check public settings:', err);
-  }
-
   function clearErrors() {
     errorBox.style.display = 'none';
     [emailError, usernameError, displayError, passwordError].forEach(el => el.style.display = 'none');
@@ -347,6 +332,21 @@ export async function renderRegister(container, routeContext) {
       submitBtn.textContent = 'Create Account';
     }
   };
+
+  // Check registration_enabled setting asynchronously after submit handler is bound
+  try {
+    const settings = await api('/settings/public');
+    if (settings && settings.registration_enabled === false) {
+      disabledNotice.style.display = 'block';
+      submitBtn.disabled = true;
+      emailInput.disabled = true;
+      usernameInput.disabled = true;
+      displayInput.disabled = true;
+      passwordInput.disabled = true;
+    }
+  } catch (err) {
+    console.warn('Could not check public settings:', err);
+  }
 
   return function routeCleanup() {
     document.title = 'Folio — Knowledge & Research Library';

@@ -264,3 +264,61 @@ def test_concurrent_demote_two_super_admins():
         verify_db.commit()
     finally:
         verify_db.close()
+
+
+def test_r13_deactivating_user_blocks_immediately_and_prevents_resuscitation(db_session):
+    """
+    R13 / AUTH-02:
+    Deactivating a user immediately blocks active sessions with 403 ACCOUNT_DISABLED,
+    and re-enabling does not resuscitate pre-deactivation sessions.
+    """
+    from fastapi.testclient import TestClient
+    from src.backend.main import app
+    from src.backend.core.database import get_db
+
+    def override_get_db():
+        try:
+            yield db_session
+        finally:
+            pass
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        admin_client = TestClient(app, base_url="http://testserver")
+        reader_client = TestClient(app, base_url="http://testserver")
+
+        csrf_admin = auth_login(admin_client, "admin@folio.test")
+        csrf_reader = auth_login(reader_client, "reader@folio.test")
+        reader = db_session.query(User).filter(User.username == "reader").first()
+
+        deact = admin_client.patch(
+            f"/api/v1/admin/users/{reader.id}",
+            headers={"X-CSRF-Token": csrf_admin},
+            json={"is_active": False},
+        )
+        assert deact.status_code == 200
+
+        blocked = reader_client.patch(
+            "/api/v1/auth/profile",
+            headers={"X-CSRF-Token": csrf_reader},
+            json={"display_name": "Blocked"},
+        )
+        assert blocked.status_code == 403
+        assert blocked.json()["error"]["code"] == "ACCOUNT_DISABLED"
+
+        react = admin_client.patch(
+            f"/api/v1/admin/users/{reader.id}",
+            headers={"X-CSRF-Token": csrf_admin},
+            json={"is_active": True},
+        )
+        assert react.status_code == 200
+
+        # Pre-deactivation session cannot be resuscitated after re-enable
+        stale_res = reader_client.patch(
+            "/api/v1/auth/profile",
+            headers={"X-CSRF-Token": csrf_reader},
+            json={"display_name": "Resuscitated"},
+        )
+        assert stale_res.status_code in (401, 403)
+    finally:
+        app.dependency_overrides.clear()

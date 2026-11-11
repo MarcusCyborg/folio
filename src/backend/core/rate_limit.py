@@ -7,14 +7,14 @@ Policy Specification:
 1. Policy Keys & Action Scopes:
    - login_target:
        Key format: f"login:target:{hash_identifier(client_ip)}:{hash_identifier(normalized_email)}"
-       Scope: Limits consecutive failed login attempts against a specific account from an IP.
+       Scope: Limits consecutive failed + in-flight login attempts against a specific account from an IP.
        Limits: max_failed=settings.RATE_LIMIT_LOGIN_MAX_FAILED (default: 5) within
                window_seconds=settings.RATE_LIMIT_LOGIN_WINDOW_SECONDS (default: 60s).
        Credential Privacy: Neither passwords, tokens, nor raw email addresses are stored in keys
        or logged. SHA-256 digests ensure privacy and fixed key width.
    - login_ip:
        Key format: f"login:ip:{hash_identifier(client_ip)}"
-       Scope: Limits total failed login attempts from a given IP across all accounts (credential stuffing protection).
+       Scope: Limits total failed + in-flight login attempts from a given IP across all accounts.
        Limits: max_failed=settings.RATE_LIMIT_LOGIN_MAX_FAILED * 3 (default: 15) within
                window_seconds=settings.RATE_LIMIT_LOGIN_WINDOW_SECONDS (default: 60s).
    - register_ip:
@@ -23,52 +23,29 @@ Policy Specification:
        Limits: max_attempts=settings.RATE_LIMIT_REGISTER_MAX (default: 10) within
                window_seconds=settings.RATE_LIMIT_REGISTER_WINDOW_SECONDS (default: 60s).
 
-2. Successful Login Policy:
-   - On successful authentication, ONLY the targeted account counter (login:target:...) is reset.
-   - The IP-wide counter (login:ip:...) is deliberately NOT reset.
-   - Invariant: A successful authentication on one account cannot wipe the counters of other accounts
-     or reset IP-wide abuse limits.
-
-3. 429 & Retry-After Contract:
-   - When a rate limit threshold is exceeded:
-       HTTP Status: 429 Too Many Requests
-       Header: "Retry-After: <seconds>", calculated as max(1, ceil(oldest_active_attempt + window_seconds - current_time)).
-       Response Error Code: "TOO_MANY_REQUESTS"
-
-4. Multi-Process Sharing & Worker Restart Resilience:
-   - State is persisted in PostgreSQL table `rate_limit_buckets`.
-   - Independent web workers and processes share the exact same database store.
-   - Worker or process restart preserves all active rate limit counters without data loss.
-
-5. Atomic Admission & Concurrency:
-   - Evaluates and inserts attempts atomically using PostgreSQL row-level locking (`SELECT ... FOR UPDATE`).
-   - Multiple concurrent requests cannot read stale remaining counts or exceed thresholds.
-   - Lock Ordering: When multiple keys are locked (e.g. target + IP), keys are locked in strict
-     lexicographical order to prevent deadlocks.
-
-6. Autonomous Transaction Lifecycle (Rollback Independence):
-   - Rate limiting operations execute and COMMIT on their own isolated database session/connection.
-   - If the main HTTP request subsequently fails authentication (HTTP 401) or is rolled back,
-     the rate limit attempt is ALREADY committed and will NOT roll back with the request's transaction.
-
-7. Database Monotonic Clock:
-   - Uses PostgreSQL's authoritative server clock (`SELECT EXTRACT(EPOCH FROM clock_timestamp())`).
-   - Completely eliminates cross-worker clock skew across multiple server nodes.
-
-8. Store Down & Failure Transparency:
-   - If the shared store is unreachable or down:
-       - Strictly NO silent fallback to local in-memory dictionaries.
-       - Logs the error with sanitized connection info (no passwords).
-       - Raises RateLimitStoreUnavailableError -> HTTP 503 Service Unavailable ("RATE_LIMIT_UNAVAILABLE").
-
-9. Bounded Retention:
-   - Each row retains only timestamps falling within its sliding window.
-   - Expired bucket rows older than retention threshold are pruned during maintenance.
+2. Atomic Login Admission & Slot Reservation (R03 / AUTH-01):
+   - Before expensive Argon2id password verification runs, `reserve_login_attempt()` atomically
+     evaluates active failures + unexpired in-flight reservations across both `login_target` and
+     `login_ip` buckets using deterministic lexicographical row-level locking (`SELECT ... FOR UPDATE`).
+   - If either bucket has reached its limit, the request is immediately rejected with HTTP 429
+     before touching password verification.
+   - If admitted, a short-lived reservation token (`exp = now + reservation_ttl_seconds`) is
+     committed immediately so database row locks are NEVER held during Argon2id CPU hashing.
+   - On failed password verification: `commit_login_reservation_failure()` converts the in-flight
+     reservation into a full-window failure timestamp.
+   - On successful authentication: `commit_login_reservation_success()` atomically locks both
+     buckets, clears committed failure timestamps and its own reservation token from
+     `login_target` (preserving unexpired concurrent in-flight reservations), and removes ONLY
+     its own reservation token from `login_ip` (preserving prior IP-wide failure history and
+     concurrent IP reservations).
+   - On unexpected error or worker crash: `release_login_reservation()` releases the slot in
+     `finally:`, and any unclosed reservation from a hard crash auto-expires at `exp`.
 """
 
 import time
 import math
 import json
+import uuid
 import logging
 import hashlib
 from contextlib import contextmanager
@@ -82,6 +59,8 @@ from src.backend.core.audit import redact_sensitive_text
 
 logger = logging.getLogger("folio.rate_limit")
 
+DEFAULT_LOGIN_RESERVATION_TTL_SECONDS = 15.0
+
 
 class RateLimitStoreUnavailableError(Exception):
     """Raised when the rate limit database store is down, unreachable, or uninitialized."""
@@ -90,11 +69,19 @@ class RateLimitStoreUnavailableError(Exception):
 
 class RateLimitResult:
     """Encapsulates the result of a rate limit admission check."""
-    def __init__(self, allowed: bool, retry_after: int = 0, current_count: int = 0, limit: int = 0):
+    def __init__(
+        self,
+        allowed: bool,
+        retry_after: int = 0,
+        current_count: int = 0,
+        limit: int = 0,
+        reservation_token: Optional[str] = None,
+    ):
         self.allowed = allowed
         self.retry_after = retry_after
         self.current_count = current_count
         self.limit = limit
+        self.reservation_token = reservation_token
 
     def __bool__(self) -> bool:
         return self.allowed
@@ -102,7 +89,7 @@ class RateLimitResult:
     def __repr__(self) -> str:
         return (
             f"RateLimitResult(allowed={self.allowed}, retry_after={self.retry_after}, "
-            f"count={self.current_count}/{self.limit})"
+            f"count={self.current_count}/{self.limit}, reserved={bool(self.reservation_token)})"
         )
 
 
@@ -145,6 +132,51 @@ def normalize_bucket_key(identifier: str, default_prefix: str = "bucket") -> str
         return identifier
     digest = hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:32]
     return f"{default_prefix}:{digest}"
+
+
+def _parse_raw_attempts(raw_attempts: Any) -> List[Any]:
+    if not raw_attempts:
+        return []
+    if isinstance(raw_attempts, str):
+        try:
+            raw_attempts = json.loads(raw_attempts)
+        except Exception:
+            return []
+    return list(raw_attempts) if isinstance(raw_attempts, list) else []
+
+
+def _filter_active_entries(raw_attempts: Any, now_epoch: float, window_seconds: float) -> List[Any]:
+    """
+    Filters bucket entries to retain:
+    1. Committed failure float timestamps within (now_epoch - window_seconds, +inf).
+    2. Unexpired in-flight reservation dicts {'token': ..., 'ts': ..., 'exp': ...} with exp > now_epoch.
+    """
+    cutoff = now_epoch - window_seconds
+    active: List[Any] = []
+    for entry in _parse_raw_attempts(raw_attempts):
+        if isinstance(entry, (int, float)):
+            if float(entry) > cutoff:
+                active.append(float(entry))
+        elif isinstance(entry, dict):
+            exp = entry.get("exp")
+            ts = entry.get("ts", 0)
+            if isinstance(exp, (int, float)) and float(exp) > now_epoch and float(ts) > cutoff:
+                active.append(entry)
+    return active
+
+
+def _compute_retry_after(active_entries: List[Any], now_epoch: float, window_seconds: float) -> int:
+    """Calculates seconds until at least one active failure or reservation expires."""
+    expiries: List[float] = []
+    for entry in active_entries:
+        if isinstance(entry, (int, float)):
+            expiries.append(float(entry) + float(window_seconds))
+        elif isinstance(entry, dict) and isinstance(entry.get("exp"), (int, float)):
+            expiries.append(float(entry["exp"]))
+    if not expiries:
+        return 1
+    earliest_expiry = min(expiries)
+    return max(1, int(math.ceil(earliest_expiry - now_epoch)))
 
 
 class PostgresRateLimiter:
@@ -212,6 +244,254 @@ class PostgresRateLimiter:
             now_epoch = time.time()
         return now_epoch, is_pg
 
+    def _lock_and_read_bucket(self, session, key_hash: str, action: str, is_pg: bool) -> List[Any]:
+        row = None
+        for _ in range(3):
+            if is_pg:
+                session.execute(
+                    text(
+                        """
+                        INSERT INTO rate_limit_buckets (key_hash, action, attempts, created_at, updated_at)
+                        VALUES (:key_hash, :action, '[]'::jsonb, clock_timestamp(), clock_timestamp())
+                        ON CONFLICT (key_hash) DO NOTHING;
+                        """
+                    ),
+                    {"key_hash": key_hash, "action": action},
+                )
+                row = session.execute(
+                    text("SELECT attempts FROM rate_limit_buckets WHERE key_hash = :key_hash FOR UPDATE;"),
+                    {"key_hash": key_hash},
+                ).fetchone()
+            else:
+                session.execute(
+                    text(
+                        """
+                        INSERT INTO rate_limit_buckets (key_hash, action, attempts, created_at, updated_at)
+                        VALUES (:key_hash, :action, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        ON CONFLICT (key_hash) DO NOTHING;
+                        """
+                    ),
+                    {"key_hash": key_hash, "action": action},
+                )
+                row = session.execute(
+                    text("SELECT attempts FROM rate_limit_buckets WHERE key_hash = :key_hash;"),
+                    {"key_hash": key_hash},
+                ).fetchone()
+            if row is not None:
+                break
+
+        return _parse_raw_attempts(row[0] if row else [])
+
+    def _write_bucket(self, session, key_hash: str, entries: List[Any], is_pg: bool):
+        update_sql = (
+            "UPDATE rate_limit_buckets SET attempts = :attempts, updated_at = clock_timestamp() WHERE key_hash = :key_hash;"
+            if is_pg
+            else "UPDATE rate_limit_buckets SET attempts = :attempts, updated_at = CURRENT_TIMESTAMP WHERE key_hash = :key_hash;"
+        )
+        session.execute(
+            text(update_sql),
+            {"attempts": json.dumps(entries), "key_hash": key_hash},
+        )
+
+    def reserve_login_attempt(
+        self,
+        target_identifier: str,
+        ip_identifier: str,
+        max_target_failed: int = 5,
+        max_ip_failed: int = 15,
+        window_seconds: int = 60,
+        reservation_ttl_seconds: float = DEFAULT_LOGIN_RESERVATION_TTL_SECONDS,
+    ) -> RateLimitResult:
+        """
+        Atomically evaluates and reserves an in-flight login admission slot across both
+        target account and client IP buckets BEFORE password verification.
+        Releases all DB row locks immediately upon commit so Argon2id hashing runs lock-free.
+        """
+        target_key = normalize_bucket_key(target_identifier, "login:target")
+        ip_key = normalize_bucket_key(ip_identifier, "login:ip")
+        buckets_meta = [
+            (target_key, "login_target", max_target_failed),
+            (ip_key, "login_ip", max_ip_failed),
+        ]
+        # Deduplicate & sort keys deterministically to prevent deadlocks
+        unique_sorted_keys = sorted({k for k, _, _ in buckets_meta})
+        action_by_key = {k: act for k, act, _ in buckets_meta}
+
+        with self._session_scope() as session:
+            now_epoch, is_pg = self._get_db_time_and_dialect(session)
+            active_by_key: Dict[str, List[Any]] = {}
+
+            for key_hash in unique_sorted_keys:
+                raw = self._lock_and_read_bucket(session, key_hash, action_by_key[key_hash], is_pg)
+                active_by_key[key_hash] = _filter_active_entries(raw, now_epoch, window_seconds)
+
+            target_active = active_by_key[target_key]
+            ip_active = active_by_key[ip_key]
+
+            target_exceeded = len(target_active) >= max_target_failed
+            ip_exceeded = len(ip_active) >= max_ip_failed
+
+            if target_exceeded or ip_exceeded:
+                retry_candidates = []
+                if target_exceeded:
+                    retry_candidates.append(_compute_retry_after(target_active, now_epoch, window_seconds))
+                if ip_exceeded:
+                    retry_candidates.append(_compute_retry_after(ip_active, now_epoch, window_seconds))
+                session.commit()
+                return RateLimitResult(
+                    allowed=False,
+                    retry_after=max(retry_candidates) if retry_candidates else 1,
+                    current_count=len(target_active) if target_exceeded else len(ip_active),
+                    limit=max_target_failed if target_exceeded else max_ip_failed,
+                    reservation_token=None,
+                )
+
+            token = uuid.uuid4().hex
+            effective_ttl = min(float(window_seconds), max(1.0, float(reservation_ttl_seconds)))
+            reservation_entry = {
+                "token": token,
+                "ts": now_epoch,
+                "exp": now_epoch + effective_ttl,
+            }
+
+            for key_hash in unique_sorted_keys:
+                entries = list(active_by_key[key_hash])
+                entries.append(reservation_entry)
+                self._write_bucket(session, key_hash, entries, is_pg)
+
+            session.commit()
+            return RateLimitResult(
+                allowed=True,
+                retry_after=0,
+                current_count=len(active_by_key[target_key]) + 1,
+                limit=max_target_failed,
+                reservation_token=token,
+            )
+
+    def commit_login_reservation_failure(
+        self,
+        identifiers: List[str],
+        reservation_token: Optional[str],
+        window_seconds: int = 60,
+    ):
+        """
+        Converts an in-flight login reservation into a persistent failed attempt timestamp
+        valid for the full rate-limit window.
+        """
+        if not identifiers:
+            return
+        normalized_keys = sorted(set(normalize_bucket_key(i, "login:target") for i in identifiers))
+
+        with self._session_scope() as session:
+            now_epoch, is_pg = self._get_db_time_and_dialect(session)
+            for key_hash in normalized_keys:
+                action = "login_ip" if ":ip:" in key_hash else "login_target"
+                raw = self._lock_and_read_bucket(session, key_hash, action, is_pg)
+                active = _filter_active_entries(raw, now_epoch, window_seconds)
+
+                updated: List[Any] = []
+                replaced = False
+                for entry in active:
+                    if reservation_token and isinstance(entry, dict) and entry.get("token") == reservation_token:
+                        updated.append(float(entry.get("ts", now_epoch)))
+                        replaced = True
+                    else:
+                        updated.append(entry)
+
+                if not replaced:
+                    updated.append(now_epoch)
+
+                self._write_bucket(session, key_hash, updated, is_pg)
+
+            session.commit()
+
+    def commit_login_reservation_success(
+        self,
+        target_identifier: str,
+        ip_identifier: str,
+        reservation_token: Optional[str],
+        window_seconds: int = 60,
+    ):
+        """
+        Finalizes a successful login under deterministic row locks:
+        - `login:target:...`: clears committed failure timestamps and this request's own
+          `reservation_token`, while preserving all other unexpired in-flight reservations.
+        - `login:ip:...`: removes ONLY this request's `reservation_token`, while preserving
+          prior IP failures and other unexpired in-flight reservations.
+        """
+        target_key = normalize_bucket_key(target_identifier, "login:target")
+        ip_key = normalize_bucket_key(ip_identifier, "login:ip")
+        keys_sorted = sorted({target_key, ip_key})
+
+        with self._session_scope() as session:
+            now_epoch, is_pg = self._get_db_time_and_dialect(session)
+            for key_hash in keys_sorted:
+                row = session.execute(
+                    text(
+                        "SELECT attempts FROM rate_limit_buckets WHERE key_hash = :key_hash FOR UPDATE;"
+                        if is_pg
+                        else "SELECT attempts FROM rate_limit_buckets WHERE key_hash = :key_hash;"
+                    ),
+                    {"key_hash": key_hash},
+                ).fetchone()
+                if not row:
+                    continue
+
+                active = _filter_active_entries(row[0], now_epoch, window_seconds)
+                if key_hash == target_key:
+                    remaining = [
+                        entry
+                        for entry in active
+                        if isinstance(entry, dict)
+                        and not (reservation_token and entry.get("token") == reservation_token)
+                    ]
+                else:
+                    remaining = [
+                        entry
+                        for entry in active
+                        if not (
+                            reservation_token
+                            and isinstance(entry, dict)
+                            and entry.get("token") == reservation_token
+                        )
+                    ]
+                self._write_bucket(session, key_hash, remaining, is_pg)
+
+            session.commit()
+
+    def release_login_reservation(
+        self,
+        identifiers: List[str],
+        reservation_token: Optional[str],
+        window_seconds: int = 60,
+    ):
+        """Releases an in-flight login reservation without recording a failure (used on unexpected errors)."""
+        if not identifiers or not reservation_token:
+            return
+        normalized_keys = sorted(set(normalize_bucket_key(i, "login:target") for i in identifiers))
+
+        with self._session_scope() as session:
+            now_epoch, is_pg = self._get_db_time_and_dialect(session)
+            for key_hash in normalized_keys:
+                row = session.execute(
+                    text(
+                        "SELECT attempts FROM rate_limit_buckets WHERE key_hash = :key_hash FOR UPDATE;"
+                        if is_pg
+                        else "SELECT attempts FROM rate_limit_buckets WHERE key_hash = :key_hash;"
+                    ),
+                    {"key_hash": key_hash},
+                ).fetchone()
+                if row:
+                    active = _filter_active_entries(row[0], now_epoch, window_seconds)
+                    remaining = [
+                        entry
+                        for entry in active
+                        if not (isinstance(entry, dict) and entry.get("token") == reservation_token)
+                    ]
+                    self._write_bucket(session, key_hash, remaining, is_pg)
+
+            session.commit()
+
     def check_login_rate_limit(
         self,
         identifier: str,
@@ -219,12 +499,12 @@ class PostgresRateLimiter:
         window_seconds: int = 60
     ) -> RateLimitResult:
         """
-        Non-mutating admission check for failed login attempts.
+        Non-mutating admission check for failed + in-flight login attempts.
         Returns RateLimitResult indicating whether the identifier is within limits.
         """
         key_hash = normalize_bucket_key(identifier, "login:target")
         with self._session_scope() as session:
-            now_epoch, is_pg = self._get_db_time_and_dialect(session)
+            now_epoch, _ = self._get_db_time_and_dialect(session)
 
             query = text("SELECT attempts FROM rate_limit_buckets WHERE key_hash = :key_hash;")
             row = session.execute(query, {"key_hash": key_hash}).fetchone()
@@ -232,19 +512,10 @@ class PostgresRateLimiter:
             if not row or not row[0]:
                 return RateLimitResult(allowed=True, retry_after=0, current_count=0, limit=max_failed)
 
-            raw_attempts = row[0]
-            if isinstance(raw_attempts, str):
-                try:
-                    raw_attempts = json.loads(raw_attempts)
-                except Exception:
-                    raw_attempts = []
-
-            cutoff = now_epoch - window_seconds
-            active = [t for t in raw_attempts if isinstance(t, (int, float)) and t > cutoff]
+            active = _filter_active_entries(row[0], now_epoch, window_seconds)
 
             if len(active) >= max_failed:
-                oldest = min(active) if active else now_epoch
-                retry_after = max(1, int(math.ceil(oldest + window_seconds - now_epoch)))
+                retry_after = _compute_retry_after(active, now_epoch, window_seconds)
                 return RateLimitResult(
                     allowed=False,
                     retry_after=retry_after,
@@ -275,74 +546,42 @@ class PostgresRateLimiter:
 
         with self._session_scope() as session:
             now_epoch, is_pg = self._get_db_time_and_dialect(session)
-            cutoff = now_epoch - window_seconds
 
             for key_hash in normalized_keys:
                 action = "login_ip" if ":ip:" in key_hash else "login_target"
-                if is_pg:
-                    session.execute(
-                        text(
-                            """
-                            INSERT INTO rate_limit_buckets (key_hash, action, attempts, created_at, updated_at)
-                            VALUES (:key_hash, :action, '[]'::jsonb, clock_timestamp(), clock_timestamp())
-                            ON CONFLICT (key_hash) DO NOTHING;
-                            """
-                        ),
-                        {"key_hash": key_hash, "action": action}
-                    )
-                    row = session.execute(
-                        text("SELECT attempts FROM rate_limit_buckets WHERE key_hash = :key_hash FOR UPDATE;"),
-                        {"key_hash": key_hash}
-                    ).fetchone()
-                else:
-                    session.execute(
-                        text(
-                            """
-                            INSERT INTO rate_limit_buckets (key_hash, action, attempts, created_at, updated_at)
-                            VALUES (:key_hash, :action, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                            ON CONFLICT (key_hash) DO NOTHING;
-                            """
-                        ),
-                        {"key_hash": key_hash, "action": action}
-                    )
-                    row = session.execute(
-                        text("SELECT attempts FROM rate_limit_buckets WHERE key_hash = :key_hash;"),
-                        {"key_hash": key_hash}
-                    ).fetchone()
-
-                raw_attempts = row[0] if row and row[0] is not None else []
-                if isinstance(raw_attempts, str):
-                    try:
-                        raw_attempts = json.loads(raw_attempts)
-                    except Exception:
-                        raw_attempts = []
-
-                active = [t for t in raw_attempts if isinstance(t, (int, float)) and t > cutoff]
+                raw_attempts = self._lock_and_read_bucket(session, key_hash, action, is_pg)
+                active = _filter_active_entries(raw_attempts, now_epoch, window_seconds)
                 active.append(now_epoch)
-
-                update_sql = (
-                    "UPDATE rate_limit_buckets SET attempts = :attempts, updated_at = clock_timestamp() WHERE key_hash = :key_hash;"
-                    if is_pg else
-                    "UPDATE rate_limit_buckets SET attempts = :attempts, updated_at = CURRENT_TIMESTAMP WHERE key_hash = :key_hash;"
-                )
-                session.execute(
-                    text(update_sql),
-                    {"attempts": json.dumps(active), "key_hash": key_hash}
-                )
+                self._write_bucket(session, key_hash, active, is_pg)
 
             session.commit()
 
-    def record_successful_login(self, identifier: str):
+    def record_successful_login(self, identifier: str, window_seconds: Optional[int] = None):
         """
-        Resets failed login attempts for a specific target account.
+        Resets failed login attempts for a specific target account while preserving
+        any unexpired in-flight reservations.
         In accordance with policy, IP-wide counters are deliberately NOT reset.
         """
+        effective_window = float(
+            window_seconds
+            if window_seconds is not None
+            else getattr(settings, "RATE_LIMIT_LOGIN_WINDOW_SECONDS", 60)
+        )
         key_hash = normalize_bucket_key(identifier, "login:target")
         with self._session_scope() as session:
-            session.execute(
-                text("DELETE FROM rate_limit_buckets WHERE key_hash = :key_hash;"),
-                {"key_hash": key_hash}
-            )
+            now_epoch, is_pg = self._get_db_time_and_dialect(session)
+            row = session.execute(
+                text(
+                    "SELECT attempts FROM rate_limit_buckets WHERE key_hash = :key_hash FOR UPDATE;"
+                    if is_pg
+                    else "SELECT attempts FROM rate_limit_buckets WHERE key_hash = :key_hash;"
+                ),
+                {"key_hash": key_hash},
+            ).fetchone()
+            if row:
+                active = _filter_active_entries(row[0], now_epoch, effective_window)
+                remaining = [entry for entry in active if isinstance(entry, dict)]
+                self._write_bucket(session, key_hash, remaining, is_pg)
             session.commit()
 
     def check_and_record_register(
@@ -360,51 +599,11 @@ class PostgresRateLimiter:
 
         with self._session_scope() as session:
             now_epoch, is_pg = self._get_db_time_and_dialect(session)
-            cutoff = now_epoch - window_seconds
-
-            if is_pg:
-                session.execute(
-                    text(
-                        """
-                        INSERT INTO rate_limit_buckets (key_hash, action, attempts, created_at, updated_at)
-                        VALUES (:key_hash, :action, '[]'::jsonb, clock_timestamp(), clock_timestamp())
-                        ON CONFLICT (key_hash) DO NOTHING;
-                        """
-                    ),
-                    {"key_hash": key_hash, "action": action}
-                )
-                row = session.execute(
-                    text("SELECT attempts FROM rate_limit_buckets WHERE key_hash = :key_hash FOR UPDATE;"),
-                    {"key_hash": key_hash}
-                ).fetchone()
-            else:
-                session.execute(
-                    text(
-                        """
-                        INSERT INTO rate_limit_buckets (key_hash, action, attempts, created_at, updated_at)
-                        VALUES (:key_hash, :action, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                        ON CONFLICT (key_hash) DO NOTHING;
-                        """
-                    ),
-                    {"key_hash": key_hash, "action": action}
-                )
-                row = session.execute(
-                    text("SELECT attempts FROM rate_limit_buckets WHERE key_hash = :key_hash;"),
-                    {"key_hash": key_hash}
-                ).fetchone()
-
-            raw_attempts = row[0] if row and row[0] is not None else []
-            if isinstance(raw_attempts, str):
-                try:
-                    raw_attempts = json.loads(raw_attempts)
-                except Exception:
-                    raw_attempts = []
-
-            active = [t for t in raw_attempts if isinstance(t, (int, float)) and t > cutoff]
+            raw_attempts = self._lock_and_read_bucket(session, key_hash, action, is_pg)
+            active = _filter_active_entries(raw_attempts, now_epoch, window_seconds)
 
             if len(active) >= max_attempts:
-                oldest = min(active) if active else now_epoch
-                retry_after = max(1, int(math.ceil(oldest + window_seconds - now_epoch)))
+                retry_after = _compute_retry_after(active, now_epoch, window_seconds)
                 session.commit()
                 return RateLimitResult(
                     allowed=False,
@@ -414,15 +613,7 @@ class PostgresRateLimiter:
                 )
 
             active.append(now_epoch)
-            update_sql = (
-                "UPDATE rate_limit_buckets SET attempts = :attempts, updated_at = clock_timestamp() WHERE key_hash = :key_hash;"
-                if is_pg else
-                "UPDATE rate_limit_buckets SET attempts = :attempts, updated_at = CURRENT_TIMESTAMP WHERE key_hash = :key_hash;"
-            )
-            session.execute(
-                text(update_sql),
-                {"attempts": json.dumps(active), "key_hash": key_hash}
-            )
+            self._write_bucket(session, key_hash, active, is_pg)
             session.commit()
             return RateLimitResult(
                 allowed=True,
@@ -450,51 +641,11 @@ class PostgresRateLimiter:
 
         with self._session_scope() as session:
             now_epoch, is_pg = self._get_db_time_and_dialect(session)
-            cutoff = now_epoch - window_seconds
-
-            if is_pg:
-                session.execute(
-                    text(
-                        """
-                        INSERT INTO rate_limit_buckets (key_hash, action, attempts, created_at, updated_at)
-                        VALUES (:key_hash, :action, '[]'::jsonb, clock_timestamp(), clock_timestamp())
-                        ON CONFLICT (key_hash) DO NOTHING;
-                        """
-                    ),
-                    {"key_hash": key_hash, "action": action}
-                )
-                row = session.execute(
-                    text("SELECT attempts FROM rate_limit_buckets WHERE key_hash = :key_hash FOR UPDATE;"),
-                    {"key_hash": key_hash}
-                ).fetchone()
-            else:
-                session.execute(
-                    text(
-                        """
-                        INSERT INTO rate_limit_buckets (key_hash, action, attempts, created_at, updated_at)
-                        VALUES (:key_hash, :action, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                        ON CONFLICT (key_hash) DO NOTHING;
-                        """
-                    ),
-                    {"key_hash": key_hash, "action": action}
-                )
-                row = session.execute(
-                    text("SELECT attempts FROM rate_limit_buckets WHERE key_hash = :key_hash;"),
-                    {"key_hash": key_hash}
-                ).fetchone()
-
-            raw_attempts = row[0] if row and row[0] is not None else []
-            if isinstance(raw_attempts, str):
-                try:
-                    raw_attempts = json.loads(raw_attempts)
-                except Exception:
-                    raw_attempts = []
-
-            active = [t for t in raw_attempts if isinstance(t, (int, float)) and t > cutoff]
+            raw_attempts = self._lock_and_read_bucket(session, key_hash, action, is_pg)
+            active = _filter_active_entries(raw_attempts, now_epoch, window_seconds)
 
             if len(active) >= max_attempts:
-                oldest = min(active) if active else now_epoch
-                retry_after = max(1, int(math.ceil(oldest + window_seconds - now_epoch)))
+                retry_after = _compute_retry_after(active, now_epoch, window_seconds)
                 session.commit()
                 return RateLimitResult(
                     allowed=False,
@@ -504,15 +655,7 @@ class PostgresRateLimiter:
                 )
 
             active.append(now_epoch)
-            update_sql = (
-                "UPDATE rate_limit_buckets SET attempts = :attempts, updated_at = clock_timestamp() WHERE key_hash = :key_hash;"
-                if is_pg else
-                "UPDATE rate_limit_buckets SET attempts = :attempts, updated_at = CURRENT_TIMESTAMP WHERE key_hash = :key_hash;"
-            )
-            session.execute(
-                text(update_sql),
-                {"attempts": json.dumps(active), "key_hash": key_hash}
-            )
+            self._write_bucket(session, key_hash, active, is_pg)
             session.commit()
             return RateLimitResult(
                 allowed=True,

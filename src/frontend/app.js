@@ -103,7 +103,7 @@ export function getPublicSettings() {
   return publicSettings;
 }
 
-async function loadPublicSettings() {
+export async function loadPublicSettings() {
   try {
     const data = await api('/settings/public');
     if (data) {
@@ -121,9 +121,17 @@ async function loadPublicSettings() {
 async function bootstrap() {
   const appContainer = document.getElementById('app');
 
-  // 1. Subscribe user menu to session changes
+  // 1. Subscribe user menu & protected route guard to session changes across tabs
+  let previousUser = null;
   subscribeSession((session) => {
     renderUserMenu(session);
+    if (previousUser && !session.user) {
+      const currentHash = (window.location.hash || '').replace(/^#/, '');
+      if (currentHash.startsWith('/admin') || currentHash.startsWith('/profile')) {
+        navigate('/login');
+      }
+    }
+    previousUser = session.user ? { ...session.user } : null;
   });
 
   // 2. Initial session & public settings retrieval

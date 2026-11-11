@@ -5,6 +5,7 @@ import { api, ApiError } from '../core/api.js';
 import { can, getSession } from '../core/session.js';
 import { navigate, registerLeaveGuard, clearLeaveGuard } from '../core/router.js';
 import { notify, confirmAction, renderPagination, renderError } from '../core/ui.js';
+import { renderMathInContainer } from '../core/math.js';
 import { wrapAdminLayout } from './admin_shell.js';
 
 // ==============================================================================
@@ -100,6 +101,9 @@ export async function renderAdminDocuments(container, routeContext) {
   searchInput.onkeydown = (e) => {
     if (e.key === 'Enter') filterBtn.click();
   };
+
+  let closeAllDropdowns = null;
+  let escListener = null;
 
   try {
     const data = await api('/admin/documents', {
@@ -207,14 +211,14 @@ export async function renderAdminDocuments(container, routeContext) {
       };
     });
 
-    const closeAllDropdowns = () => {
+    closeAllDropdowns = () => {
       tableArea.querySelectorAll('.action-menu-dropdown.open').forEach((d) => {
         d.classList.remove('open');
         if (d.previousElementSibling) d.previousElementSibling.setAttribute('aria-expanded', 'false');
       });
     };
     document.addEventListener('click', closeAllDropdowns);
-    const escListener = (e) => { if (e.key === 'Escape') closeAllDropdowns(); };
+    escListener = (e) => { if (e.key === 'Escape') closeAllDropdowns(); };
     document.addEventListener('keydown', escListener);
 
     // Hook up Publish/Unpublish toggle
@@ -285,8 +289,8 @@ export async function renderAdminDocuments(container, routeContext) {
   }
 
   return () => {
-    document.removeEventListener('click', closeAllDropdowns);
-    document.removeEventListener('keydown', escListener);
+    if (closeAllDropdowns) document.removeEventListener('click', closeAllDropdowns);
+    if (escListener) document.removeEventListener('keydown', escListener);
   };
 }
 
@@ -305,8 +309,8 @@ export async function renderDocumentEditor(container, routeContext) {
   }
 
   const { params, signal } = routeContext;
-  const isNew = !params.id;
-  const docId = params.id;
+  let isNew = !params.id;
+  let docId = params.id;
 
   document.title = isNew ? 'New Document — Folio Admin' : 'Edit Document — Folio Admin';
 
@@ -353,7 +357,10 @@ export async function renderDocumentEditor(container, routeContext) {
       </div>
 
       <div class="field" style="margin-bottom: 1.5rem;">
-        <label class="label">Assign Research Tags</label>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+          <label class="label" style="margin-bottom: 0;">Assign Research Tags</label>
+          <input type="search" id="editorTagSearch" class="input input-sm" placeholder="Filter tags..." style="max-width: 220px; padding: 0.2rem 0.5rem; font-size: 0.8rem;" />
+        </div>
         <div id="editorTagsList" class="tags-checkbox-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.5rem; max-height: 180px; overflow-y: auto; padding: 0.75rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-bg);">
           <span class="spinner"></span>
         </div>
@@ -478,59 +485,88 @@ export async function renderDocumentEditor(container, routeContext) {
 
   updateActionButtons(isNew ? 'draft' : 'draft');
 
-  // Load Categories & Tags
-  try {
-    const [catsRes, tagsRes] = await Promise.all([
-      api('/admin/categories', { query: { page: 1, page_size: 100 }, signal }),
-      api('/admin/tags', { query: { page: 1, page_size: 100 }, signal }),
-    ]);
-
-    const catSelect = container.querySelector('#editCategory');
-    catSelect.innerHTML = catsRes.items.map(c => `
-      <option value="${c.id}">${escapeText(c.name)}</option>
-    `).join('');
-
-    const tagsContainer = container.querySelector('#editorTagsList');
-    tagsContainer.innerHTML = tagsRes.items.map(t => `
-      <label class="tag-checkbox-item" style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; cursor: pointer;">
-        <input type="checkbox" value="${t.id}" class="tag-chk" />
-        <span>${escapeText(t.name)}</span>
-      </label>
-    `).join('');
-  } catch (err) {
-    if (signal?.aborted) return;
-    console.error('Failed to load taxonomies:', err);
-  }
-
-  // Load existing document if editing
+  let selectedTagIds = new Set();
+  let allLoadedTags = [];
+  let taxonomyLoadFailed = false;
   let existingDoc = null;
-  if (!isNew) {
-    try {
-      existingDoc = await api(`/admin/documents/${docId}`, { signal });
-      container.querySelector('#editTitle').value = existingDoc.title || '';
-      container.querySelector('#editSummary').value = existingDoc.summary || '';
-      container.querySelector('#editContent').value = existingDoc.content || '';
-      container.querySelector('#editCategory').value = existingDoc.category_id || '';
-      container.querySelector('#editAuthor').value = existingDoc.author || '';
-      container.querySelector('#editSourceUrl').value = existingDoc.source_url || '';
-      container.querySelector('#editLicense').value = existingDoc.source_license || '';
-      container.querySelector('#editAttribution').value = existingDoc.source_attribution || '';
-      container.querySelector('#editCoverUrl').value = existingDoc.cover_image_url || '';
-      container.querySelector('#editCoverAlt').value = existingDoc.cover_image_alt || '';
 
-      const tagIdsSet = new Set((existingDoc.tags || []).map(t => t.id));
-      container.querySelectorAll('.tag-chk').forEach(chk => {
-        if (tagIdsSet.has(chk.value)) chk.checked = true;
+  function renderTagsCheckboxList(filter = '') {
+    const tagsContainer = container.querySelector('#editorTagsList');
+    if (!tagsContainer) return;
+    const q = (filter || '').trim().toLowerCase();
+    const map = new Map();
+    allLoadedTags.forEach(t => map.set(t.id, t));
+    if (existingDoc && existingDoc.tags) {
+      existingDoc.tags.forEach(t => {
+        if (!map.has(t.id)) map.set(t.id, t);
       });
-
-      // Update button labels according to persisted status
-      updateActionButtons(existingDoc.status);
-      resetDirty();
-    } catch (err) {
-      if (signal?.aborted) return;
-      renderError(container, err);
+    }
+    const list = Array.from(map.values()).filter(t => !q || t.name.toLowerCase().includes(q) || (t.slug && t.slug.toLowerCase().includes(q)));
+    if (list.length === 0) {
+      tagsContainer.innerHTML = '<div style="grid-column: 1 / -1; color: var(--color-muted); font-size: 0.85rem; padding: 0.5rem;">No tags matching filter.</div>';
       return;
     }
+    tagsContainer.innerHTML = list.map(t => {
+      const isChecked = selectedTagIds.has(t.id);
+      return `
+        <label class="tag-checkbox-item" style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; cursor: pointer;">
+          <input type="checkbox" value="${t.id}" class="tag-chk" ${isChecked ? 'checked' : ''} />
+          <span>${escapeText(t.name)}</span>
+        </label>
+      `;
+    }).join('');
+
+    tagsContainer.querySelectorAll('.tag-chk').forEach(chk => {
+      chk.onchange = () => {
+        if (chk.checked) selectedTagIds.add(chk.value);
+        else selectedTagIds.delete(chk.value);
+        markDirty();
+      };
+    });
+  }
+
+  async function loadTaxonomies() {
+    const tagsContainer = container.querySelector('#editorTagsList');
+    const catSelect = container.querySelector('#editCategory');
+    taxonomyLoadFailed = false;
+    try {
+      let allTags = [];
+      let tagPage = 1;
+      let totalTags = 1;
+      while (allTags.length < totalTags) {
+        const res = await api('/admin/tags', { query: { page: tagPage, page_size: 100 }, signal });
+        if (!res.items || res.items.length === 0) break;
+        allTags.push(...res.items);
+        totalTags = res.total || allTags.length;
+        tagPage++;
+      }
+      allLoadedTags = allTags;
+
+      const catsRes = await api('/admin/categories', { query: { page: 1, page_size: 100 }, signal });
+      const currentCatVal = catSelect.value || (existingDoc ? existingDoc.category_id : '');
+      catSelect.innerHTML = (catsRes.items || []).map(c => `
+        <option value="${c.id}" ${currentCatVal === c.id ? 'selected' : ''}>${escapeText(c.name)}</option>
+      `).join('');
+
+      renderTagsCheckboxList(container.querySelector('#editorTagSearch')?.value || '');
+    } catch (err) {
+      if (signal?.aborted) return;
+      taxonomyLoadFailed = true;
+      console.error('Failed to load taxonomies:', err);
+      tagsContainer.innerHTML = `
+        <div class="notice notice-error" style="grid-column: 1 / -1; padding: 0.5rem; margin: 0;">
+          <p style="margin: 0 0 0.35rem 0;">Failed to load taxonomies: ${escapeText(err.message)}</p>
+          <button type="button" class="btn btn-secondary btn-sm" id="retryEditorTaxonomyBtn">Retry Loading</button>
+        </div>
+      `;
+      const retryBtn = tagsContainer.querySelector('#retryEditorTaxonomyBtn');
+      if (retryBtn) retryBtn.onclick = () => loadTaxonomies();
+    }
+  }
+
+  const tagSearchInput = container.querySelector('#editorTagSearch');
+  if (tagSearchInput) {
+    tagSearchInput.oninput = () => renderTagsCheckboxList(tagSearchInput.value);
   }
 
   // Markdown Write vs Preview tab (F1 Safe Markdown Preview via Sanitized Backend Endpoint)
@@ -559,10 +595,43 @@ export async function renderDocumentEditor(container, routeContext) {
         body: { content: contentInput.value || '' },
       });
       previewBox.innerHTML = `<div class="markdown-body" style="font-family: var(--font-ui); color: var(--color-text); line-height: 1.6;">${res.rendered_content || '<p class="text-muted" style="color: var(--color-muted);">No content to preview.</p>'}</div>`;
+      renderMathInContainer(previewBox);
     } catch (err) {
       previewBox.innerHTML = `<div class="notice notice-error" style="margin: 1rem 0;"><p>Preview generation failed: ${escapeText(err.message)}</p></div>`;
     }
   };
+
+  await loadTaxonomies();
+
+  // Load existing document if editing
+  if (!isNew) {
+    try {
+      existingDoc = await api(`/admin/documents/${docId}`, { signal });
+      container.querySelector('#editTitle').value = existingDoc.title || '';
+      container.querySelector('#editSummary').value = existingDoc.summary || '';
+      container.querySelector('#editContent').value = existingDoc.content || '';
+      container.querySelector('#editCategory').value = existingDoc.category_id || '';
+      container.querySelector('#editAuthor').value = existingDoc.author || '';
+      container.querySelector('#editSourceUrl').value = existingDoc.source_url || '';
+      container.querySelector('#editLicense').value = existingDoc.source_license || '';
+      container.querySelector('#editAttribution').value = existingDoc.source_attribution || '';
+      container.querySelector('#editCoverUrl').value = existingDoc.cover_image_url || '';
+      container.querySelector('#editCoverAlt').value = existingDoc.cover_image_alt || '';
+
+      selectedTagIds = new Set((existingDoc.tags || []).map(t => t.id));
+      renderTagsCheckboxList(tagSearchInput?.value || '');
+
+      // Update button labels according to persisted status
+      updateActionButtons(existingDoc.status);
+      resetDirty();
+    } catch (err) {
+      if (signal?.aborted) return;
+      renderError(container, err);
+      return;
+    }
+  }
+
+
 
   // Save Document logic (F3 Persistent State & Status Alignment)
   async function saveDocument(desiredAction) {
@@ -573,14 +642,20 @@ export async function renderDocumentEditor(container, routeContext) {
     const summary = container.querySelector('#editSummary').value.trim();
     const content = container.querySelector('#editContent').value;
     const category_id = container.querySelector('#editCategory').value;
-    const author = container.querySelector('#editAuthor').value.trim() || undefined;
-    const source_url = container.querySelector('#editSourceUrl').value.trim() || undefined;
-    const source_license = container.querySelector('#editLicense').value.trim() || undefined;
-    const source_attribution = container.querySelector('#editAttribution').value.trim() || undefined;
-    const cover_image_url = container.querySelector('#editCoverUrl').value.trim() || undefined;
-    const cover_image_alt = container.querySelector('#editCoverAlt').value.trim() || undefined;
+    if (taxonomyLoadFailed) {
+      errorBox.innerHTML = '<strong>Error:</strong> Cannot save document because taxonomy failed to load. Please retry loading tags first.';
+      errorBox.style.display = 'block';
+      return;
+    }
 
-    const selectedTags = Array.from(container.querySelectorAll('.tag-chk:checked')).map(c => c.value);
+    const author = container.querySelector('#editAuthor').value.trim() || null;
+    const source_url = container.querySelector('#editSourceUrl').value.trim() || null;
+    const source_license = container.querySelector('#editLicense').value.trim() || null;
+    const source_attribution = container.querySelector('#editAttribution').value.trim() || null;
+    const cover_image_url = container.querySelector('#editCoverUrl').value.trim() || null;
+    const cover_image_alt = container.querySelector('#editCoverAlt').value.trim() || null;
+
+    const selectedTags = Array.from(selectedTagIds);
 
     // Validation
     if (!title || !summary || !content || !category_id) {
@@ -616,8 +691,15 @@ export async function renderDocumentEditor(container, routeContext) {
           body: payload,
         });
 
+        // Update state to existing doc to ensure publish retries do not create duplicate drafts
+        docId = savedDoc.id;
+        isNew = false;
+        try {
+          window.history.replaceState(null, '', `#/admin/documents/${docId}/edit`);
+        } catch (_) {}
+
         if (desiredAction === 'publish') {
-          savedDoc = await api(`/admin/documents/${savedDoc.id}/status`, {
+          savedDoc = await api(`/admin/documents/${docId}/status`, {
             method: 'PATCH',
             body: { status: 'published' },
           });
@@ -714,7 +796,7 @@ export async function renderTaxonomyManager(container, routeContext) {
   document.title = 'Taxonomy Management — Folio Admin';
 
   const html = `
-    <div class="taxonomy-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start;">
+    <div class="taxonomy-grid">
       <!-- Categories Panel -->
       <div class="taxonomy-panel card" style="padding: 1.25rem;">
         <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
@@ -728,13 +810,20 @@ export async function renderTaxonomyManager(container, routeContext) {
 
       <!-- Tags Panel -->
       <div class="taxonomy-panel card" style="padding: 1.25rem;">
-        <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-          <h3 style="margin: 0;">Tags</h3>
+        <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <h3 style="margin: 0;">Tags</h3>
+            <span class="badge badge-gray" id="tagsTotalBadge" style="display: none;">0</span>
+          </div>
           <button class="btn btn-primary btn-sm" id="addTagBtn">+ New Tag</button>
+        </div>
+        <div style="margin-bottom: 0.75rem;">
+          <input type="search" class="input input-sm" id="taxonomyTagSearchInput" placeholder="Filter tags by name..." aria-label="Filter tags" style="width: 100%;" />
         </div>
         <div id="tagsListArea" class="table-container">
           <div style="text-align: center; padding: 2rem;"><span class="spinner"></span></div>
         </div>
+        <div id="tagsPaginationBar" style="margin-top: 0.75rem;"></div>
       </div>
     </div>
 
@@ -745,16 +834,47 @@ export async function renderTaxonomyManager(container, routeContext) {
   container.innerHTML = wrapAdminLayout('/admin/taxonomy', 'Taxonomy & Classification', html);
 
   const modalRoot = container.querySelector('#taxonomyModalRoot');
+  const tagSearchInput = container.querySelector('#taxonomyTagSearchInput');
+  const tagsTotalBadge = container.querySelector('#tagsTotalBadge');
+  const tagsPaginationBar = container.querySelector('#tagsPaginationBar');
 
-  async function loadTaxonomies() {
+  let loadGeneration = 0;
+  let tagPage = 1;
+  const tagPageSize = 50;
+  let tagQuery = '';
+  let tagSearchTimer = null;
+
+  async function loadTaxonomies(clampAttempt = 0) {
+    const gen = ++loadGeneration;
+    const catArea = container.querySelector('#categoriesListArea');
+    const tagArea = container.querySelector('#tagsListArea');
+
+    if (catArea && !catArea.querySelector('table')) {
+      catArea.innerHTML = '<div style="text-align: center; padding: 2rem;"><span class="spinner" aria-label="Loading categories..."></span></div>';
+    }
+    if (tagArea && clampAttempt === 0) {
+      tagArea.innerHTML = '<div style="text-align: center; padding: 2rem;"><span class="spinner" aria-label="Loading tags..."></span></div>';
+    }
+
     try {
       const [catsRes, tagsRes] = await Promise.all([
         api('/admin/categories', { query: { page: 1, page_size: 100 }, signal }),
-        api('/admin/tags', { query: { page: 1, page_size: 100 }, signal }),
+        api('/admin/tags', { query: { q: tagQuery || undefined, page: tagPage, page_size: tagPageSize }, signal }),
       ]);
 
+      if (signal?.aborted || gen !== loadGeneration) return;
+
+      const totalTags = Number(tagsRes.total ?? (tagsRes.items ? tagsRes.items.length : 0));
+      const totalPages = totalTags > 0 ? Math.max(1, Math.ceil(totalTags / tagPageSize)) : 1;
+
+      if (totalTags === 0) {
+        tagPage = 1;
+      } else if ((!tagsRes.items || tagsRes.items.length === 0) && tagPage > totalPages && clampAttempt < 2) {
+        tagPage = totalPages;
+        return await loadTaxonomies(clampAttempt + 1);
+      }
+
       // Categories Table
-      const catArea = container.querySelector('#categoriesListArea');
       if (!catsRes.items || catsRes.items.length === 0) {
         catArea.innerHTML = '<div class="empty-state" style="padding: 1.5rem; text-align: center;">No categories configured.</div>';
       } else {
@@ -783,10 +903,15 @@ export async function renderTaxonomyManager(container, routeContext) {
         `;
       }
 
-      // Tags Table
-      const tagArea = container.querySelector('#tagsListArea');
+      // Tags Table & Pagination (R07 / R3-03 clamped)
+      if (tagsTotalBadge) {
+        tagsTotalBadge.textContent = String(totalTags);
+        tagsTotalBadge.style.display = 'inline-block';
+      }
+
       if (!tagsRes.items || tagsRes.items.length === 0) {
-        tagArea.innerHTML = '<div class="empty-state" style="padding: 1.5rem; text-align: center;">No tags configured.</div>';
+        tagArea.innerHTML = `<div class="empty-state" style="padding: 1.5rem; text-align: center;">${tagQuery ? 'No tags match your filter.' : 'No tags configured.'}</div>`;
+        if (tagsPaginationBar) tagsPaginationBar.innerHTML = '';
       } else {
         const tagRows = tagsRes.items.map(t => `
           <tr data-tag-id="${t.id}" data-tag-name="${escapeAttr(t.name)}" data-tag-slug="${escapeAttr(t.slug)}">
@@ -810,6 +935,26 @@ export async function renderTaxonomyManager(container, routeContext) {
             <tbody>${tagRows}</tbody>
           </table>
         `;
+
+        if (tagsPaginationBar) {
+          if (totalPages > 1) {
+            tagsPaginationBar.innerHTML = `
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                <span style="font-size: 0.8rem; color: var(--color-muted);">Page ${tagPage} of ${totalPages} (${totalTags} tags)</span>
+                <div style="display: flex; gap: 0.35rem;">
+                  <button type="button" class="btn btn-secondary btn-sm" id="tagsPrevPageBtn" ${tagPage <= 1 ? 'disabled' : ''}>Previous</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="tagsNextPageBtn" ${tagPage >= totalPages ? 'disabled' : ''}>Next</button>
+                </div>
+              </div>
+            `;
+            const prevBtn = tagsPaginationBar.querySelector('#tagsPrevPageBtn');
+            const nextBtn = tagsPaginationBar.querySelector('#tagsNextPageBtn');
+            if (prevBtn) prevBtn.onclick = () => { if (tagPage > 1) { tagPage -= 1; loadTaxonomies(); } };
+            if (nextBtn) nextBtn.onclick = () => { if (tagPage < totalPages) { tagPage += 1; loadTaxonomies(); } };
+          } else {
+            tagsPaginationBar.innerHTML = '';
+          }
+        }
       }
 
       // Bind Category Edit
@@ -896,9 +1041,36 @@ export async function renderTaxonomyManager(container, routeContext) {
       });
 
     } catch (err) {
-      if (signal?.aborted) return;
+      if (signal?.aborted || gen !== loadGeneration) return;
       console.error('Failed to load taxonomies:', err);
+      const errMsg = escapeText(err?.message || 'Unable to load taxonomy items.');
+      const renderPanelError = (panelId, retryBtnId) => {
+        const area = container.querySelector(panelId);
+        if (!area) return;
+        area.innerHTML = `
+          <div class="notice notice-error" role="alert" style="margin: 0.75rem;">
+            <p style="margin: 0 0 0.5rem 0;"><strong>Failed to load taxonomy:</strong> ${errMsg}</p>
+            <button type="button" class="btn btn-secondary btn-sm" id="${retryBtnId}">Retry Loading</button>
+          </div>
+        `;
+        const retryBtn = area.querySelector(`#${retryBtnId}`);
+        if (retryBtn) retryBtn.onclick = () => loadTaxonomies();
+      };
+      renderPanelError('#categoriesListArea', 'retryCategoriesLoadBtn');
+      renderPanelError('#tagsListArea', 'retryTagsLoadBtn');
+      if (tagsPaginationBar) tagsPaginationBar.innerHTML = '';
     }
+  }
+
+  if (tagSearchInput) {
+    tagSearchInput.oninput = () => {
+      clearTimeout(tagSearchTimer);
+      tagSearchTimer = setTimeout(() => {
+        tagQuery = tagSearchInput.value.trim();
+        tagPage = 1;
+        loadTaxonomies();
+      }, 150);
+    };
   }
 
   // Modal helper for Category Create/Edit
@@ -951,7 +1123,7 @@ export async function renderTaxonomyManager(container, routeContext) {
     saveBtn.onclick = async () => {
       const name = modalRoot.querySelector('#catModalName').value.trim();
       const slug = modalRoot.querySelector('#catModalSlug').value.trim() || undefined;
-      const description = modalRoot.querySelector('#catModalDesc').value.trim() || undefined;
+      const description = modalRoot.querySelector('#catModalDesc').value.trim() || null;
 
       if (!name) {
         errBox.textContent = 'Category Name is required.';
@@ -1068,6 +1240,8 @@ export async function renderTaxonomyManager(container, routeContext) {
   // Hook toolbar buttons
   container.querySelector('#addCategoryBtn').onclick = () => showCategoryModal();
   container.querySelector('#addTagBtn').onclick = () => showTagModal();
+
+
 
   await loadTaxonomies();
 }

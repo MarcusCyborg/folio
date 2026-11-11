@@ -27,7 +27,9 @@ export function notify(message, { kind = 'info', duration = 3500 } = {}) {
   }, duration);
 }
 
-export function confirmAction({ title = 'Confirm Action', message, confirmLabel = 'Confirm', destructive = false } = {}) {
+export function confirmAction(options = {}) {
+  const opts = typeof options === 'string' ? { message: options } : (options || {});
+  const { title = 'Confirm Action', message, confirmLabel = 'Confirm', destructive = false } = opts;
   return new Promise((resolve) => {
     const previousActiveElement = document.activeElement;
 

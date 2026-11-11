@@ -175,6 +175,7 @@ function renderSeoTable(tableArea, paginationArea, data, onPageChange, container
 }
 
 function showSeoModal(container, doc) {
+  const previousActiveElement = document.activeElement;
   const modalRoot = container.querySelector('#seoModalRoot');
   const seoTitle = doc.seo_title || '';
   const seoDesc = doc.seo_description || '';
@@ -185,10 +186,10 @@ function showSeoModal(container, doc) {
 
   modalRoot.innerHTML = `
     <div class="modal-backdrop" id="seoBackdrop">
-      <div class="modal-dialog card" style="max-width: 680px; margin: 4vh auto; padding: 1.5rem; max-height: 92vh; overflow-y: auto;">
+      <div class="modal-dialog card" role="dialog" aria-modal="true" aria-labelledby="seoModalTitle" style="max-width: 680px; margin: 4vh auto; padding: 1.5rem; max-height: 92vh; overflow-y: auto;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-          <h3 style="margin: 0;">SEO Metadata: ${escapeText(doc.title)}</h3>
-          <button class="btn btn-sm btn-secondary" id="closeSeoBtn">&times;</button>
+          <h3 id="seoModalTitle" style="margin: 0;">SEO Metadata: ${escapeText(doc.title)}</h3>
+          <button class="btn btn-sm btn-secondary" id="closeSeoBtn" aria-label="Close SEO Dialog">&times;</button>
         </div>
 
         <form id="seoEditForm">
@@ -285,8 +286,40 @@ function showSeoModal(container, doc) {
   updateCountersAndPreview();
 
   function closeModal() {
+    document.removeEventListener('keydown', keydownTrapHandler);
     modalRoot.innerHTML = '';
+    if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
+      previousActiveElement.focus();
+    }
   }
+
+  function keydownTrapHandler(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeModal();
+      return;
+    }
+    if (e.key === 'Tab') {
+      const dialog = modalRoot.querySelector('.modal-dialog');
+      if (!dialog) return;
+      const focusables = Array.from(dialog.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+        .filter(el => !el.disabled && el.offsetParent !== null);
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  }
+  document.addEventListener('keydown', keydownTrapHandler);
+  setTimeout(() => {
+    inputTitle?.focus();
+  }, 50);
 
   closeBtn.addEventListener('click', closeModal);
   cancelBtn.addEventListener('click', closeModal);

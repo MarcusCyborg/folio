@@ -78,3 +78,37 @@ def test_spider_removes_edit_controls_before_markdown_conversion():
     assert "## Purpose" in records[0]["text"]
     assert paragraph.strip() in records[0]["text"]
     assert "Keep the word edit in prose." in records[0]["text"]
+
+
+def test_r11_math_normalization_nested_braces_code_preservation_and_xss_safety():
+    """
+    R11 / F08:
+    1. Nested and multiline {\\displaystyle ...} / {\\textstyle ...} normalize cleanly
+       without corrupting subscripts/underscores during Markdown parsing.
+    2. Fenced code blocks and inline code spans preserve literal LaTeX syntax.
+    3. Raw HTML / XSS payloads inside math delimiters are neutralized by sanitization.
+    """
+    from src.backend.core.sanitizer import render_and_sanitize_markdown
+
+    src = (
+        "== Scaled Dot-Product Attention ==\n\n"
+        "{\\displaystyle {\\text{Attention}}(Q,K,V)={\\text{softmax}}\\left({\\frac {QK^{T}}{\\sqrt {d_{k}}}}\\right)V}\n\n"
+        "Inline term {\\textstyle x_{1} + y_{2}} and \\(a_{i} + b_{j}\\).\n\n"
+        "Inline code `{\\displaystyle literal}` and fenced block:\n\n"
+        "```latex\n"
+        "{\\displaystyle fenced_literal}\n"
+        "```\n\n"
+        "Malicious math: $$<img src=x onerror=alert(1)> x_{1}$$\n"
+    )
+    rendered = render_and_sanitize_markdown(src)
+
+    assert "<h2>Scaled Dot-Product Attention</h2>" in rendered
+    assert '<div class="math-display">$$' in rendered
+    assert "d_{k}" in rendered
+    assert "<em>" not in rendered  # underscores inside math must NOT become <em>
+    assert '<span class="math-inline">\\(x_{1} + y_{2}\\)</span>' in rendered
+    assert '<span class="math-inline">\\(a_{i} + b_{j}\\)</span>' in rendered
+    assert "<code>{\\displaystyle literal}</code>" in rendered
+    assert "{\\displaystyle fenced_literal}" in rendered
+    assert "<img" not in rendered
+    assert "&lt;img" in rendered

@@ -24,7 +24,7 @@ except Exception:
 " > /dev/null 2>&1; do
     RETRY_COUNT=$((RETRY_COUNT + 1))
     if [ "${RETRY_COUNT}" -ge "${MAX_RETRIES}" ]; then
-        echo "[ERROR] [worker] Timed out waiting for database at ${DATABASE_URL}"
+        echo "[ERROR] [worker] Timed out waiting for database after ${MAX_RETRIES} attempts (connection details redacted)"
         exit 1
     fi
     echo "[INFO] [worker] Database not ready yet (attempt ${RETRY_COUNT}/${MAX_RETRIES}). Sleeping 2s..."

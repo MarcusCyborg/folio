@@ -262,6 +262,7 @@ def test_search_pagination_with_context_token(live_server, browser_instance):
         if next_btn.is_enabled():
             next_btn.click()
             page.wait_for_url("**/#/library?**page=2**")
+            page.locator(".pagination .page-info:has-text('Page 2')").wait_for(state="visible", timeout=10000)
             page.wait_for_selector(".document-card-row")
 
             # Verify page 2 reflects updated ranking positions (#16 or higher)

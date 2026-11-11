@@ -214,7 +214,8 @@ function syncLibraryControlsAndChips(instance, queryParams) {
   const tagIds = instance.currentQuery.get('tag_ids') || '';
   const dateFrom = instance.currentQuery.get('date_from') || '';
   const dateTo = instance.currentQuery.get('date_to') || '';
-  const sort = instance.currentQuery.get('sort') || 'newest';
+  const rawSort = instance.currentQuery.get('sort') || 'newest';
+  const sort = rawSort === 'title_asc' ? 'title' : rawSort;
 
   instance.currentCategoryId = categoryId;
   const isSearchMode = Boolean(q);
@@ -394,7 +395,7 @@ export async function renderLibrary(container, routeContext) {
                 <label class="label" for="filterDateTo" style="font-size: 0.75rem;">To</label>
                 <input type="date" class="input input-sm" id="filterDateTo" value="${escapeAttr(dateTo)}" />
               </div>
-              <div id="dateValidationError" class="notice notice-error" style="display: none; font-size: 0.75rem; padding: 0.4rem; margin-bottom: 0.5rem;"></div>
+              <div id="dateValidationError" class="date-validation-inline-error" style="display: none; font-size: 0.75rem; padding: 0.4rem; margin-bottom: 0.5rem; color: var(--color-danger); background: var(--color-danger-subtle, #fde8e8); border-radius: var(--radius-sm, 4px);"></div>
               <button type="button" class="btn btn-primary btn-sm" id="applyDateFilterBtn" style="width: 100%;">Apply Dates</button>
             </div>
           </div>
@@ -432,7 +433,7 @@ export async function renderLibrary(container, routeContext) {
               <label for="libraryModeSelect" class="control-label">Mode:</label>
               <select class="select select-sm" id="libraryModeSelect" aria-label="Search mode selection">
                 <option value="bm25" ${mode === 'bm25' ? 'selected' : ''}>BM25 Keyword</option>
-                <option value="vector" ${mode === 'vector' ? 'selected' : ''}>Semantic Vector</option>
+                <option value="semantic" ${mode === 'semantic' || mode === 'vector' ? 'selected' : ''}>Semantic Vector</option>
                 <option value="hybrid" ${mode === 'hybrid' ? 'selected' : ''}>Hybrid Reciprocal</option>
               </select>
             </div>
@@ -443,7 +444,7 @@ export async function renderLibrary(container, routeContext) {
               <select class="select select-sm" id="librarySortSelect" aria-label="Sort documents" ${isSearchMode ? 'disabled' : ''}>
                 <option value="newest" ${sort === 'newest' ? 'selected' : ''}>Newest First</option>
                 <option value="oldest" ${sort === 'oldest' ? 'selected' : ''}>Oldest First</option>
-                <option value="title_asc" ${sort === 'title_asc' ? 'selected' : ''}>Title A–Z</option>
+                <option value="title" ${sort === 'title' || sort === 'title_asc' ? 'selected' : ''}>Title A–Z</option>
                 <option value="title_desc" ${sort === 'title_desc' ? 'selected' : ''}>Title Z–A</option>
                 <option value="popular" ${sort === 'popular' ? 'selected' : ''}>Most Popular</option>
               </select>
@@ -546,6 +547,7 @@ export async function renderLibrary(container, routeContext) {
   };
 
   container.__folioLibraryInstance = instance;
+  try { sessionStorage.setItem('folio_last_library_route', window.location.hash || '#/library'); } catch (_) {}
 
   // Push updates to URL hash bound to this instance, synchronously updating currentQuery and chips
   function updateRoute(updates) {
@@ -569,6 +571,7 @@ export async function renderLibrary(container, routeContext) {
 
     const queryString = currentParams.toString();
     const newHash = queryString ? `/library?${queryString}` : '/library';
+    try { sessionStorage.setItem('folio_last_library_route', `#${newHash}`); } catch (_) {}
     navigate(newHash);
   }
 

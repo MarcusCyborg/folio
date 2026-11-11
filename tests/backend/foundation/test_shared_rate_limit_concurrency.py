@@ -453,15 +453,16 @@ def test_concurrent_processes_burst_registration_atomic_admission(shared_db):
 def test_window_expiry_restores_admission(shared_db):
     """
     WINDOW EXPIRY:
-    Records attempts with a 4-second window. While within 4s, the key is blocked.
-    After sleeping past the window, active attempts expire and admission is restored.
+    Records attempts with a 10-second window (allowing margin for multi-process Python startup).
+    While within the window, the key is blocked. After waiting past the window, active attempts
+    expire and admission is restored.
     """
     db_url, engine = shared_db
     key = "login:target:expiry_ip:user"
     limit = 2
-    window = 4
+    window = 10
 
-    # Record 2 failures -> hits limit
+    # Record 2 failures across separate OS processes -> hits limit
     run_worker_process(db_url, "record_failed", key, limit=limit, window=window)
     run_worker_process(db_url, "record_failed", key, limit=limit, window=window)
 
@@ -469,8 +470,8 @@ def test_window_expiry_restores_admission(shared_db):
     assert chk_blocked["allowed"] is False
     assert chk_blocked["count"] == 2
 
-    # Sleep past window
-    time.sleep(4.2)
+    # Wait past full window from newest attempt -> all entries expire cleanly
+    time.sleep(window + 0.5)
 
     chk_restored = run_worker_process(db_url, "check_login", key, limit=limit, window=window)
     assert chk_restored["allowed"] is True
@@ -498,3 +499,353 @@ def test_distinct_keys_isolation(shared_db):
     assert run_worker_process(db_url, "check_login", key_b, limit=5)["allowed"] is True
     assert run_worker_process(db_url, "check_login", key_b, limit=5)["count"] == 0
 
+
+# =========================================================================
+# 10. R03 / AUTH-01: Atomic Login Admission Before Password Verification
+# =========================================================================
+
+def test_concurrent_login_barrier_enforces_exact_admission_limit_before_verify(shared_db):
+    """
+    R03 / AUTH-01 PRIMARY REGRESSION:
+    With max_failed=5 and 12 concurrent login attempts synchronized at verify_password,
+    atomic slot reservation must admit at most 5 requests into Argon2 password verification
+    and reject the remaining 7 with HTTP 429 before verification runs.
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from starlette.requests import Request
+    from starlette.responses import Response
+    import src.backend.api.auth as auth
+    from src.backend.core.session import create_session
+    from src.backend.core.exceptions import AppException
+    from src.backend.models.auth import User
+    from src.backend.core.security import hash_password
+
+    db_url, engine = shared_db
+    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+
+    with session_factory() as db:
+        victim = User(
+            email="r03_victim@folio.test",
+            username="r03_victim",
+            display_name="R03 Victim",
+            password_hash=hash_password("CorrectHorseBatteryStaple1!"),
+            role_key="member",
+            is_active=True,
+        )
+        db.add(victim)
+        db.commit()
+
+    limiter = PostgresRateLimiter(engine=engine, session_factory=session_factory)
+    limiter.reset()
+
+    old_limiter = auth.rate_limiter
+    old_enabled = settings.RATE_LIMIT_ENABLED
+    old_max_failed = settings.RATE_LIMIT_LOGIN_MAX_FAILED
+    old_verify = auth.verify_password
+
+    auth.rate_limiter = limiter
+    settings.RATE_LIMIT_ENABLED = True
+    settings.RATE_LIMIT_LOGIN_MAX_FAILED = 5
+
+    workers = 12
+    admitted_limit = 5
+    barrier = threading.Barrier(admitted_limit)
+    verify_counter = {"count": 0}
+    counter_lock = threading.Lock()
+
+    def verify_with_barrier(plain: str, encoded: str) -> bool:
+        with counter_lock:
+            verify_counter["count"] += 1
+        barrier.wait(timeout=15)
+        return old_verify(plain, encoded)
+
+    auth.verify_password = verify_with_barrier
+
+    def run_login_request(_idx: int) -> int:
+        with session_factory() as db:
+            sess_obj, _ = create_session(db)
+            db.commit()
+            ctx = auth.SessionContext(sess_obj, sess_obj.actor_key, None, sess_obj.csrf_token)
+            req = Request({
+                "type": "http",
+                "method": "POST",
+                "path": "/api/v1/auth/login",
+                "headers": [],
+                "client": ("203.0.113.88", 12345),
+            })
+            try:
+                auth.login(
+                    auth.LoginRequest(email="r03_victim@folio.test", password="WrongPassword!"),
+                    req,
+                    Response(),
+                    ctx,
+                    db,
+                )
+                return 200
+            except AppException as exc:
+                return exc.status_code
+
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            statuses = list(executor.map(run_login_request, range(workers)))
+    finally:
+        auth.verify_password = old_verify
+        auth.rate_limiter = old_limiter
+        settings.RATE_LIMIT_ENABLED = old_enabled
+        settings.RATE_LIMIT_LOGIN_MAX_FAILED = old_max_failed
+
+    assert verify_counter["count"] == admitted_limit, (
+        f"Expected at most {admitted_limit} password verifications, got {verify_counter['count']}"
+    )
+    assert statuses.count(401) == admitted_limit
+    assert statuses.count(429) == workers - admitted_limit
+
+    target_key = build_login_target_key("203.0.113.88", "r03_victim@folio.test")
+    post_check = limiter.check_login_rate_limit(target_key, max_failed=5)
+    assert post_check.allowed is False
+    assert post_check.current_count == admitted_limit
+
+
+def test_login_reservation_crash_expiry_and_success_reset(shared_db):
+    """
+    R03 / AUTH-01 LIFECYCLE:
+    - Unreleased reservations from crashed workers auto-expire after reservation_ttl_seconds.
+    - Explicit release frees slot immediately without recording a failure.
+    - Successful login resets target bucket while preserving prior IP failures.
+    """
+    db_url, engine = shared_db
+    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    limiter = PostgresRateLimiter(engine=engine, session_factory=session_factory)
+    limiter.reset()
+
+    t_key = build_login_target_key("198.51.100.42", "crash_test@folio.test")
+    i_key = build_login_ip_key("198.51.100.42")
+
+    # 1. Simulate 2 crashed workers reserving slots with short 2s TTL
+    r1 = limiter.reserve_login_attempt(t_key, i_key, max_target_failed=2, max_ip_failed=10, window_seconds=60, reservation_ttl_seconds=2.0)
+    r2 = limiter.reserve_login_attempt(t_key, i_key, max_target_failed=2, max_ip_failed=10, window_seconds=60, reservation_ttl_seconds=2.0)
+    assert r1.allowed is True and r1.reservation_token
+    assert r2.allowed is True and r2.reservation_token
+
+    # 3rd request blocked while in-flight slots are active
+    r3 = limiter.reserve_login_attempt(t_key, i_key, max_target_failed=2, max_ip_failed=10, window_seconds=60, reservation_ttl_seconds=2.0)
+    assert r3.allowed is False
+    assert r3.retry_after >= 1
+
+    # Wait past reservation TTL -> crashed slots expire automatically
+    time.sleep(2.2)
+    r4 = limiter.reserve_login_attempt(t_key, i_key, max_target_failed=2, max_ip_failed=10, window_seconds=60, reservation_ttl_seconds=15.0)
+    assert r4.allowed is True
+
+    # Release r4 explicitly -> count returns to 0
+    limiter.release_login_reservation([t_key, i_key], r4.reservation_token)
+    assert limiter.check_login_rate_limit(t_key, max_failed=2).current_count == 0
+
+    # Record 1 prior IP failure from another account, then reserve & succeed on target account
+    limiter.record_failed_login(i_key, window_seconds=60)
+    r_ok = limiter.reserve_login_attempt(t_key, i_key, max_target_failed=2, max_ip_failed=10, window_seconds=60)
+    assert r_ok.allowed is True
+    limiter.commit_login_reservation_success(t_key, i_key, r_ok.reservation_token, window_seconds=60)
+
+    assert limiter.check_login_rate_limit(t_key, max_failed=2).current_count == 0
+    assert limiter.check_login_rate_limit(i_key, max_failed=10).current_count == 1
+
+
+def test_r3_02_success_preserves_inflight_target_reservations_and_enforces_limit(shared_db):
+    """
+    R3-02 REGRESSION:
+    When 5 concurrent logins are admitted for the same target/IP and 1 completes successfully
+    while 4 remain in-flight verifying passwords, commit_login_reservation_success must clear
+    only prior failures and its own reservation token while preserving the 4 unexpired
+    in-flight target reservations. Subsequent requests while those 4 remain pending may admit
+    at most 1 additional request (4 + 1 = 5), never allowing 9 total concurrent checks.
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from starlette.requests import Request
+    from starlette.responses import Response
+    import src.backend.api.auth as auth
+    from src.backend.core.session import create_session
+    from src.backend.core.exceptions import AppException
+    from src.backend.models.auth import User
+    from src.backend.core.security import hash_password
+
+    _, engine = shared_db
+    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+
+    with session_factory() as db:
+        user = User(
+            email="r3_02_mixed@folio.test",
+            username="r3_02_mixed",
+            display_name="R302 Mixed User",
+            password_hash=hash_password("CorrectR302Pass!"),
+            role_key="member",
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+
+    limiter = PostgresRateLimiter(engine=engine, session_factory=session_factory)
+    limiter.reset()
+
+    old_limiter = auth.rate_limiter
+    old_enabled = settings.RATE_LIMIT_ENABLED
+    old_max_failed = settings.RATE_LIMIT_LOGIN_MAX_FAILED
+    old_verify = auth.verify_password
+
+    auth.rate_limiter = limiter
+    settings.RATE_LIMIT_ENABLED = True
+    settings.RATE_LIMIT_LOGIN_MAX_FAILED = 5
+
+    # Seed 1 prior IP failure from another account to confirm IP history survives
+    ip_addr = "203.0.113.99"
+    target_key = build_login_target_key(ip_addr, "r3_02_mixed@folio.test")
+    ip_key = build_login_ip_key(ip_addr)
+    limiter.record_failed_login(ip_key, window_seconds=60)
+
+    pending_entered_lock = threading.Lock()
+    pending_entered = 0
+    all_4_pending_in_verify = threading.Event()
+    release_4_pending = threading.Event()
+    verify_calls = {"wrong_wave1": 0, "right": 0, "wave2": 0}
+
+    def phased_verify(plain: str, encoded: str) -> bool:
+        nonlocal pending_entered
+        if plain == "WrongWave1!":
+            with pending_entered_lock:
+                verify_calls["wrong_wave1"] += 1
+                pending_entered += 1
+                if pending_entered == 4:
+                    all_4_pending_in_verify.set()
+            assert release_4_pending.wait(timeout=15), "Timed out waiting to release pending wave1 logins"
+            return False
+        if plain == "CorrectR302Pass!":
+            assert all_4_pending_in_verify.wait(timeout=15), "Timed out waiting for 4 pending wave1 logins"
+            with pending_entered_lock:
+                verify_calls["right"] += 1
+            return old_verify(plain, encoded)
+        with pending_entered_lock:
+            verify_calls["wave2"] += 1
+        return old_verify(plain, encoded)
+
+    auth.verify_password = phased_verify
+
+    def run_login(password: str) -> int:
+        with session_factory() as db:
+            sess_obj, _ = create_session(db)
+            db.commit()
+            ctx = auth.SessionContext(sess_obj, sess_obj.actor_key, None, sess_obj.csrf_token)
+            req = Request({
+                "type": "http",
+                "method": "POST",
+                "path": "/api/v1/auth/login",
+                "headers": [],
+                "client": (ip_addr, 12345),
+            })
+            try:
+                auth.login(
+                    auth.LoginRequest(email="r3_02_mixed@folio.test", password=password),
+                    req,
+                    Response(),
+                    ctx,
+                    db,
+                )
+                return 200
+            except AppException as exc:
+                return exc.status_code
+
+    try:
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            wrong_futures = [pool.submit(run_login, "WrongWave1!") for _ in range(4)]
+            assert all_4_pending_in_verify.wait(timeout=15)
+
+            # 5th slot: valid credentials succeed while the 4 wrong-password checks remain in-flight
+            ok_status = run_login("CorrectR302Pass!")
+            assert ok_status == 200
+
+            # Target bucket must still hold the 4 unexpired in-flight reservations
+            mid_target_check = limiter.check_login_rate_limit(target_key, max_failed=5)
+            assert mid_target_check.current_count == 4, (
+                f"Expected 4 retained in-flight target reservations after 1 success, got {mid_target_check.current_count}"
+            )
+            assert mid_target_check.allowed is True
+
+            # Send 5 concurrent wave-2 attempts while the 4 wave-1 verifications are still running
+            wave2_statuses = list(pool.map(run_login, ["WrongWave2!"] * 5))
+            assert wave2_statuses.count(401) == 1, f"Expected at most 1 new admission, got statuses={wave2_statuses}"
+            assert wave2_statuses.count(429) == 4, f"Expected 4 HTTP 429 rejections, got statuses={wave2_statuses}"
+            assert verify_calls["wave2"] == 1
+
+            # Release the 4 initial in-flight checks -> all 4 convert into failures (1 + 4 = 5 total)
+            release_4_pending.set()
+            wrong_statuses = [f.result(timeout=15) for f in wrong_futures]
+            assert wrong_statuses == [401, 401, 401, 401]
+    finally:
+        release_4_pending.set()
+        auth.verify_password = old_verify
+        auth.rate_limiter = old_limiter
+        settings.RATE_LIMIT_ENABLED = old_enabled
+        settings.RATE_LIMIT_LOGIN_MAX_FAILED = old_max_failed
+
+    final_target_check = limiter.check_login_rate_limit(target_key, max_failed=5)
+    assert final_target_check.current_count == 5
+    assert final_target_check.allowed is False
+
+    # IP bucket: 1 prior failure + 4 wave1 failures + 1 wave2 failure = 6 failures
+    final_ip_check = limiter.check_login_rate_limit(ip_key, max_failed=15)
+    assert final_ip_check.current_count == 6
+
+
+def test_r3_02_concurrent_successes_prior_failures_expiry_and_idempotency(shared_db):
+    """
+    R3-02 EDGE CASES:
+    - Prior target failures are cleared on success while other active reservations survive.
+    - Two concurrent successes clear only their own tokens; calling success/release twice is idempotent.
+    - Expired reservation tokens on cleanup do not evict newer unexpired reservations.
+    """
+    _, engine = shared_db
+    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    limiter = PostgresRateLimiter(engine=engine, session_factory=session_factory)
+    limiter.reset()
+
+    ip_addr = "198.51.100.77"
+    target_key = build_login_target_key(ip_addr, "concurrent_ok@folio.test")
+    ip_key = build_login_ip_key(ip_addr)
+
+    # 2 prior failures on both target and IP + 1 short-TTL reservation that will expire
+    limiter.record_failed_logins([target_key, ip_key], window_seconds=60)
+    limiter.record_failed_logins([target_key, ip_key], window_seconds=60)
+    r_exp = limiter.reserve_login_attempt(
+        target_key, ip_key, max_target_failed=6, max_ip_failed=15, window_seconds=60, reservation_ttl_seconds=1.5
+    )
+    assert r_exp.allowed is True
+    time.sleep(1.7)
+
+    # Reserve 3 active concurrent slots (2 that succeed, 1 still in-flight)
+    r_ok_1 = limiter.reserve_login_attempt(target_key, ip_key, max_target_failed=6, max_ip_failed=15, window_seconds=60)
+    r_ok_2 = limiter.reserve_login_attempt(target_key, ip_key, max_target_failed=6, max_ip_failed=15, window_seconds=60)
+    r_pending = limiter.reserve_login_attempt(target_key, ip_key, max_target_failed=6, max_ip_failed=15, window_seconds=60)
+    assert r_ok_1.allowed and r_ok_2.allowed and r_pending.allowed
+
+    # 1st success: clears the 2 prior failures + r_ok_1 token + expired r_exp; retains r_ok_2 and r_pending
+    limiter.commit_login_reservation_success(target_key, ip_key, r_ok_1.reservation_token, window_seconds=60)
+    assert limiter.check_login_rate_limit(target_key, max_failed=6).current_count == 2
+    assert limiter.check_login_rate_limit(ip_key, max_failed=15).current_count == 4  # 2 prior failures + 2 reservations
+
+    # Re-committing or releasing r_ok_1 token or unknown/expired tokens is an idempotent no-op
+    limiter.commit_login_reservation_success(target_key, ip_key, r_ok_1.reservation_token, window_seconds=60)
+    limiter.release_login_reservation([target_key, ip_key], r_ok_1.reservation_token, window_seconds=60)
+    limiter.release_login_reservation([target_key, ip_key], "nonexistent-token", window_seconds=60)
+    assert limiter.check_login_rate_limit(target_key, max_failed=6).current_count == 2
+    assert limiter.check_login_rate_limit(ip_key, max_failed=15).current_count == 4
+
+    # 2nd concurrent success removes only r_ok_2 -> leaves r_pending in target and prior IP failures + r_pending in IP
+    limiter.commit_login_reservation_success(target_key, ip_key, r_ok_2.reservation_token, window_seconds=60)
+    assert limiter.check_login_rate_limit(target_key, max_failed=6).current_count == 1
+    assert limiter.check_login_rate_limit(ip_key, max_failed=15).current_count == 3
+
+    # Release final pending reservation cleanly
+    limiter.release_login_reservation([target_key, ip_key], r_pending.reservation_token, window_seconds=60)
+    assert limiter.check_login_rate_limit(target_key, max_failed=6).current_count == 0
+    assert limiter.check_login_rate_limit(ip_key, max_failed=15).current_count == 2

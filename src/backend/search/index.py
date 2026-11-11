@@ -332,7 +332,7 @@ class InvertedIndex:
                 docs_bytes = docs_file.read_bytes()
                 postings_bytes = postings_file.read_bytes()
 
-                stats = json.loads(stats_bytes.decode("utf-8"))
+                stats = json.loads(stats_bytes)
                 expected_docs_sha = stats.get("docs_sha256")
                 expected_postings_sha = stats.get("postings_sha256")
 
@@ -346,8 +346,8 @@ class InvertedIndex:
                     if actual_postings_sha != expected_postings_sha:
                         raise GenerationMismatchError("Transient or corrupt postings.json checksum mismatch")
 
-                doc_entries = json.loads(docs_bytes.decode("utf-8"))
-                postings_data = json.loads(postings_bytes.decode("utf-8"))
+                doc_entries = json.loads(docs_bytes)
+                postings_data = json.loads(postings_bytes)
                 last_err = None
                 break
             except Exception as e:
@@ -384,13 +384,10 @@ class InvertedIndex:
                 doc_len=d.get("doc_len", 0),
             )
 
-        # Reconstruct postings and df
-        raw_postings = postings_data.get("postings", {})
-        # JSON converts tuple (doc_id, tf) to list [doc_id, tf]
-        index.postings = {
-            term: [(p[0], p[1]) for p in plist]
-            for term, plist in raw_postings.items()
-        }
-        index.df = postings_data.get("df", {})
+        # Reconstruct postings and df (preserve decoded 2-element [doc_id, tf] pairs directly to avoid cold-load tuple copy overhead)
+        raw_postings = postings_data.get("postings")
+        index.postings = raw_postings if isinstance(raw_postings, dict) else {}
+        raw_df = postings_data.get("df")
+        index.df = raw_df if isinstance(raw_df, dict) else {}
 
         return index

@@ -5,6 +5,7 @@ import { api, ApiError } from '../core/api.js';
 import { can, refreshSession } from '../core/session.js';
 import { notify, confirmAction, renderPagination, renderError } from '../core/ui.js';
 import { wrapAdminLayout } from './admin_shell.js';
+import { loadPublicSettings } from '../app.js';
 
 // ==============================================================================
 // 1. Users & Staff Management (with Last Super Admin Protection)
@@ -715,6 +716,7 @@ function renderSettingsForm(formArea, settings) {
           comments_enabled: commentsEnabled,
         }
       });
+      await loadPublicSettings();
       notify('Settings updated successfully.', { kind: 'success' });
     } catch (err) {
       notify(err.message || 'Failed to update settings', { kind: 'error' });

@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 
 from src.backend.models.document import Document, DocumentTag
 from src.backend.models.taxonomy import Category, Tag
@@ -111,21 +112,57 @@ def admin_get_document(db: Session, doc_id: str) -> dict:
         "liked_by_me": False,
     }
 
-def admin_create_document(db: Session, data: DocumentWrite, user: User) -> dict:
-    if not data.title.strip():
-        raise AppException(status_code=422, code="INVALID_TITLE", message="Title cannot be whitespace only")
-    if not data.content.strip():
-        raise AppException(status_code=422, code="INVALID_CONTENT", message="Content cannot be whitespace only")
-    if not data.summary.strip():
-        raise AppException(status_code=422, code="INVALID_SUMMARY", message="Summary cannot be whitespace only")
+def _is_source_url_integrity_error(err: IntegrityError) -> bool:
+    orig = getattr(err, "orig", None)
+    sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    diag = getattr(orig, "diag", None)
+    constraint_name = (getattr(diag, "constraint_name", None) or "").lower()
+    err_msg = str(err).lower()
+    if "source_url" in constraint_name or "ix_documents_source_url" in constraint_name:
+        return True
+    if "source_url" in err_msg or "ix_documents_source_url" in err_msg:
+        return True
+    if sqlstate == "23505" and "documents" in err_msg and "source_url" in err_msg:
+        return True
+    return False
 
-    # Verify category
+
+def admin_create_document(db: Session, data: DocumentWrite, user: User) -> dict:
     cat = db.query(Category).filter(Category.id == data.category_id).first()
     if not cat:
         raise AppException(status_code=422, code="INVALID_CATEGORY", message="Category does not exist")
 
     # Author defaults to current user's display_name if empty
     author_name = data.author.strip() if data.author and data.author.strip() else user.display_name
+
+    # Validate tag_ids before any mutation
+    requested_tag_ids = []
+    if data.tag_ids:
+        requested_tag_ids = list(dict.fromkeys(data.tag_ids))
+        valid_tags = db.query(Tag).filter(Tag.id.in_(requested_tag_ids)).all()
+        found_ids = {t.id for t in valid_tags}
+        missing_ids = [tid for tid in requested_tag_ids if tid not in found_ids]
+        if missing_ids:
+            raise AppException(
+                status_code=422,
+                code="INVALID_TAG_IDS",
+                message=f"The following tag IDs do not exist: {', '.join(missing_ids)}",
+                fields={"tag_ids": [f"Missing tag IDs: {', '.join(missing_ids)}"]}
+            )
+
+    # Pre-check source_url uniqueness across all rows (ix_documents_source_url covers all documents)
+    clean_source_url = data.source_url.strip() if data.source_url and data.source_url.strip() else None
+    if clean_source_url:
+        existing_doc = db.query(Document).filter(
+            Document.source_url == clean_source_url,
+        ).first()
+        if existing_doc:
+            raise AppException(
+                status_code=409,
+                code="SOURCE_URL_CONFLICT",
+                message="A document with this source URL already exists",
+                fields={"source_url": ["A document with this source URL already exists"]}
+            )
 
     doc = Document(
         title=data.title.strip(),
@@ -136,21 +173,30 @@ def admin_create_document(db: Session, data: DocumentWrite, user: User) -> dict:
         created_by=user.id,
         status="draft",  # Always draft on create
         published_at=None,
-        cover_image_url=data.cover_image_url,
-        cover_image_alt=data.cover_image_alt,
-        source_url=data.source_url,
-        source_license=data.source_license,
-        source_attribution=data.source_attribution,
+        cover_image_url=data.cover_image_url.strip() if data.cover_image_url and data.cover_image_url.strip() else None,
+        cover_image_alt=data.cover_image_alt.strip() if data.cover_image_alt and data.cover_image_alt.strip() else None,
+        source_url=clean_source_url,
+        source_license=data.source_license.strip() if data.source_license and data.source_license.strip() else None,
+        source_attribution=data.source_attribution.strip() if data.source_attribution and data.source_attribution.strip() else None,
     )
     db.add(doc)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError as err:
+        db.rollback()
+        if _is_source_url_integrity_error(err):
+            raise AppException(
+                status_code=409,
+                code="SOURCE_URL_CONFLICT",
+                message="A document with this source URL already exists",
+                fields={"source_url": ["A document with this source URL already exists"]}
+            )
+        raise
 
     # Attach tags
-    if data.tag_ids:
-        valid_tags = db.query(Tag).filter(Tag.id.in_(data.tag_ids)).all()
-        for vt in valid_tags:
-            db.add(DocumentTag(document_id=doc.id, tag_id=vt.id))
-        db.flush()
+    for tid in requested_tag_ids:
+        db.add(DocumentTag(document_id=doc.id, tag_id=tid))
+    db.flush()
     db.expire(doc, ["document_tags", "category"])
 
     write_audit(
@@ -174,6 +220,38 @@ def admin_update_document(db: Session, doc_id: str, data: dict, user: User) -> d
 
     before_state = {"title": doc.title, "summary": doc.summary}
 
+    # 1. Validate tag_ids before any mutation if provided
+    requested_tag_ids = None
+    if "tag_ids" in data and data["tag_ids"] is not None:
+        requested_tag_ids = list(dict.fromkeys(data["tag_ids"]))
+        if requested_tag_ids:
+            valid_tags = db.query(Tag).filter(Tag.id.in_(requested_tag_ids)).all()
+            found_ids = {t.id for t in valid_tags}
+            missing_ids = [tid for tid in requested_tag_ids if tid not in found_ids]
+            if missing_ids:
+                raise AppException(
+                    status_code=422,
+                    code="INVALID_TAG_IDS",
+                    message=f"The following tag IDs do not exist: {', '.join(missing_ids)}",
+                    fields={"tag_ids": [f"Missing tag IDs: {', '.join(missing_ids)}"]}
+                )
+
+    # 2. Check source_url uniqueness across all rows if provided (ix_documents_source_url covers all documents)
+    if "source_url" in data and data["source_url"]:
+        clean_url = data["source_url"].strip() if data["source_url"].strip() else None
+        if clean_url:
+            existing_doc = db.query(Document).filter(
+                Document.source_url == clean_url,
+                Document.id != doc.id,
+            ).first()
+            if existing_doc:
+                raise AppException(
+                    status_code=409,
+                    code="SOURCE_URL_CONFLICT",
+                    message="A document with this source URL already exists",
+                    fields={"source_url": ["A document with this source URL already exists"]}
+                )
+
     if "title" in data and data["title"] is not None:
         title_clean = data["title"].strip()
         if not title_clean:
@@ -194,30 +272,50 @@ def admin_update_document(db: Session, doc_id: str, data: dict, user: User) -> d
         if not cat:
             raise AppException(status_code=422, code="INVALID_CATEGORY", message="Category does not exist")
         doc.category_id = cat.id
-    if "author" in data and data["author"] is not None:
-        doc.author = data["author"].strip() if data["author"].strip() else user.display_name
+    if "author" in data:
+        author_val = data["author"]
+        if author_val is None or (isinstance(author_val, str) and not author_val.strip()):
+            doc.author = user.display_name or "Wikipedia contributors"
+        else:
+            doc.author = str(author_val).strip()
     if "cover_image_url" in data:
-        doc.cover_image_url = data["cover_image_url"]
+        cov_url = data["cover_image_url"]
+        doc.cover_image_url = cov_url.strip() if (cov_url and cov_url.strip()) else None
     if "cover_image_alt" in data:
-        doc.cover_image_alt = data["cover_image_alt"]
+        cov_alt = data["cover_image_alt"]
+        doc.cover_image_alt = cov_alt.strip() if (cov_alt and cov_alt.strip()) else None
     if "source_url" in data:
-        doc.source_url = data["source_url"]
+        s_url = data["source_url"]
+        doc.source_url = s_url.strip() if (s_url and s_url.strip()) else None
     if "source_license" in data:
-        doc.source_license = data["source_license"]
+        s_lic = data["source_license"]
+        doc.source_license = s_lic.strip() if (s_lic and s_lic.strip()) else None
     if "source_attribution" in data:
-        doc.source_attribution = data["source_attribution"]
+        s_attr = data["source_attribution"]
+        doc.source_attribution = s_attr.strip() if (s_attr and s_attr.strip()) else None
 
-    if "tag_ids" in data and data["tag_ids"] is not None:
-        db.query(DocumentTag).filter(DocumentTag.document_id == doc.id).delete(synchronize_session=False)
-        if data["tag_ids"]:
-            valid_tags = db.query(Tag).filter(Tag.id.in_(data["tag_ids"])).all()
-            for vt in valid_tags:
-                db.add(DocumentTag(document_id=doc.id, tag_id=vt.id))
+    try:
+        # 3. Only mutate tags if tag_ids was explicitly provided in data
+        if requested_tag_ids is not None:
+            db.query(DocumentTag).filter(DocumentTag.document_id == doc.id).delete(synchronize_session=False)
+            for tid in requested_tag_ids:
+                db.add(DocumentTag(document_id=doc.id, tag_id=tid))
+            db.flush()
+            db.expire(doc, ["document_tags"])
+
+        doc.updated_at = datetime.now(timezone.utc)
         db.flush()
-        db.expire(doc, ["document_tags"])
+    except IntegrityError as err:
+        db.rollback()
+        if _is_source_url_integrity_error(err):
+            raise AppException(
+                status_code=409,
+                code="SOURCE_URL_CONFLICT",
+                message="A document with this source URL already exists",
+                fields={"source_url": ["A document with this source URL already exists"]}
+            )
+        raise
 
-    doc.updated_at = datetime.now(timezone.utc)
-    db.flush()
     db.expire(doc, ["document_tags", "category"])
     write_audit(
         db,
@@ -354,8 +452,8 @@ def admin_update_category(db: Session, cat_id: str, data: CategoryUpdate, user: 
             raise AppException(status_code=422, code="INVALID_NAME", message="Category name cannot be empty")
         cat.name = name_clean
 
-    if data.description is not None:
-        cat.description = data.description
+    if "description" in data.model_fields_set:
+        cat.description = data.description.strip() if (data.description and data.description.strip()) else None
 
     if data.slug is not None:
         slug_clean = slugify(data.slug)
@@ -416,14 +514,17 @@ def admin_list_tags(db: Session, q: Optional[str] = None, page: int = 1, page_si
         db.query(Tag, func.count(DocumentTag.document_id).label("doc_count"))
         .outerjoin(DocumentTag, Tag.id == DocumentTag.tag_id)
         .group_by(Tag.id)
-        .order_by(Tag.name.asc())
+        .order_by(Tag.name.asc(), Tag.id.asc())
     )
+    count_query = db.query(func.count(Tag.id))
     if q and q.strip():
-        escaped = q.strip().replace('%', '\\%').replace('_', '\\_')
+        escaped = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         safe_q = f"%{escaped}%"
-        query = query.filter(Tag.name.ilike(safe_q))
+        filter_expr = Tag.name.ilike(safe_q, escape="\\")
+        query = query.filter(filter_expr)
+        count_query = count_query.filter(filter_expr)
 
-    total = db.query(Tag).count()
+    total = count_query.scalar() or 0
     items = query.offset((page - 1) * page_size).limit(page_size).all()
     results = [
         {"id": t.id, "name": t.name, "slug": t.slug, "document_count": count}

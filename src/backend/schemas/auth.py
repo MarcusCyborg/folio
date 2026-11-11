@@ -32,6 +32,17 @@ class RegisterRequest(BaseModel):
     password: str = Field(..., min_length=10, max_length=128)
     display_name: str = Field(..., min_length=1, max_length=80)
 
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name(cls, v: str) -> str:
+        if v is not None:
+            v = v.strip()
+            if not v:
+                raise ValueError("Display name cannot be empty or whitespace only")
+            if len(v) > 80:
+                raise ValueError("Display name must be at most 80 characters")
+        return v
+
     @field_validator("username")
     @classmethod
     def validate_username(cls, v: str) -> str:
@@ -51,6 +62,17 @@ class RegisterRequest(BaseModel):
 class UpdateProfileRequest(BaseModel):
     display_name: Optional[str] = Field(None, min_length=1, max_length=80)
     bio: Optional[str] = Field(None, max_length=1000)
+
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            v = v.strip()
+            if not v:
+                raise ValueError("Display name cannot be empty or whitespace only")
+            if len(v) > 80:
+                raise ValueError("Display name must be at most 80 characters")
+        return v
 
 class ChangePasswordRequest(BaseModel):
     current_password: str = Field(..., min_length=1, max_length=128)
