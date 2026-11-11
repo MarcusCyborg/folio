@@ -80,7 +80,11 @@ class Settings:
         # P05 Search & Semantic Engine Configuration
         self.SEARCH_CONTEXT_TTL_MINUTES: int = int(os.getenv("SEARCH_CONTEXT_TTL_MINUTES", "15"))
         self.SEARCH_TIMEOUT_SECONDS: float = float(os.getenv("SEARCH_TIMEOUT_SECONDS", "5.0"))
+        self.SEMANTIC_EXECUTOR_WORKERS: int = max(1, int(os.getenv("SEMANTIC_EXECUTOR_WORKERS", "2")))
+        self.SEMANTIC_MAX_PENDING: int = max(0, int(os.getenv("SEMANTIC_MAX_PENDING", "2")))
         self.CHROMA_PATH: str = os.getenv("CHROMA_PATH", str(PROJECT_ROOT / "data" / "vector"))
+        self.CHROMA_HOST: str = os.getenv("CHROMA_HOST", "").strip()
+        self.CHROMA_PORT: int = int(os.getenv("CHROMA_PORT", "8000"))
         self.CHROMA_COLLECTION_NAME: str = os.getenv("CHROMA_COLLECTION_NAME", "wiki_ai_english")
         self.EMBEDDING_MODEL_NAME: str = os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
         self.RRF_K: int = int(os.getenv("RRF_K", "60"))
@@ -118,6 +122,8 @@ class Settings:
                 "development",
                 "insecure",
                 "test_secret",
+                "replace_with",
+                "placeholder",
             ]
             secret_lower = self.APP_SECRET.lower()
             if any(pattern in secret_lower for pattern in weak_patterns):

@@ -43,7 +43,11 @@ async def lifespan(app: FastAPI):
     Executes fail-fast production security configuration validation on boot.
     """
     settings.validate_production()
-    yield
+    try:
+        yield
+    finally:
+        from src.backend.services.search.search_service import shutdown_search_executors
+        shutdown_search_executors(wait=False)
 
 app = FastAPI(
     title="Folio — Knowledge & Research Library API",
@@ -223,18 +227,24 @@ def readiness_check(response: Response, db: Session = Depends(get_db)):
     except Exception as exc:
         worker_info["error"] = str(exc)
 
-    # 4. Semantic Backend Status
+    # 4. Semantic Backend Status (OPS-06 / R3-04: bounded lightweight check using shared executor)
     semantic_info = {
         "status": "unavailable",
         "reason": "Semantic engine not initialized",
     }
     try:
-        from src.backend.search.semantic import SemanticAdapter
-        adapter = SemanticAdapter()
-        sem_avail, sem_reason = adapter.check_availability()
+        from src.backend.services.search.search_service import (
+            check_semantic_readiness_with_timeout,
+            semantic_adapter,
+        )
+
+        sem_avail, sem_reason = check_semantic_readiness_with_timeout(
+            adapter=semantic_adapter,
+            timeout_sec=2.0,
+        )
         semantic_info = {
             "status": "available" if sem_avail else "unavailable",
-            "reason": sem_reason or ("Online" if sem_avail else "ChromaDB unreachable"),
+            "reason": sem_reason,
         }
     except Exception as exc:
         semantic_info = {

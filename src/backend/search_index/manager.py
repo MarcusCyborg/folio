@@ -33,7 +33,15 @@ class GenerationManager:
     @staticmethod
     def get_active_generation(db: Session) -> Optional[IndexGeneration]:
         """Returns the currently active generation, or None if none is active."""
-        return db.query(IndexGeneration).filter(IndexGeneration.status == "active").first()
+        return (
+            db.query(IndexGeneration)
+            .filter(
+                IndexGeneration.status == "active",
+                IndexGeneration.generation_num > 0,
+            )
+            .order_by(IndexGeneration.generation_num.desc())
+            .first()
+        )
 
     @staticmethod
     def get_generation_by_id(db: Session, gen_id: str) -> Optional[IndexGeneration]:

@@ -330,7 +330,16 @@ def report_comment(db: Session, comment_id: str, user: User, reason: str, detail
     db.add(report)
     try:
         db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         db.rollback()
-        raise AppException(status_code=409, code="DUPLICATE_REPORT", message="You already submitted an open report for this comment")
+        orig = getattr(exc, "orig", None)
+        sqlstate = getattr(orig, "sqlstate", None)
+        err_text = str(orig or exc).lower()
+        if sqlstate == "23505" or "uq_reports_open_comment_reporter" in err_text or "unique constraint" in err_text:
+            raise AppException(
+                status_code=409,
+                code="DUPLICATE_REPORT",
+                message="You already submitted an open report for this comment",
+            )
+        raise
     return {"id": report.id, "status": "open"}

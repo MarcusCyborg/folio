@@ -5,6 +5,7 @@ import { api, ApiError } from '../core/api.js';
 import { can, getSession } from '../core/session.js';
 import { navigate, registerLeaveGuard, clearLeaveGuard } from '../core/router.js';
 import { notify, confirmAction, renderPagination, renderError } from '../core/ui.js';
+import { renderMathInContainer } from '../core/math.js';
 import { wrapAdminLayout } from './admin_shell.js';
 
 // ==============================================================================
@@ -594,6 +595,7 @@ export async function renderDocumentEditor(container, routeContext) {
         body: { content: contentInput.value || '' },
       });
       previewBox.innerHTML = `<div class="markdown-body" style="font-family: var(--font-ui); color: var(--color-text); line-height: 1.6;">${res.rendered_content || '<p class="text-muted" style="color: var(--color-muted);">No content to preview.</p>'}</div>`;
+      renderMathInContainer(previewBox);
     } catch (err) {
       previewBox.innerHTML = `<div class="notice notice-error" style="margin: 1rem 0;"><p>Preview generation failed: ${escapeText(err.message)}</p></div>`;
     }
@@ -808,13 +810,20 @@ export async function renderTaxonomyManager(container, routeContext) {
 
       <!-- Tags Panel -->
       <div class="taxonomy-panel card" style="padding: 1.25rem;">
-        <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-          <h3 style="margin: 0;">Tags</h3>
+        <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <h3 style="margin: 0;">Tags</h3>
+            <span class="badge badge-gray" id="tagsTotalBadge" style="display: none;">0</span>
+          </div>
           <button class="btn btn-primary btn-sm" id="addTagBtn">+ New Tag</button>
+        </div>
+        <div style="margin-bottom: 0.75rem;">
+          <input type="search" class="input input-sm" id="taxonomyTagSearchInput" placeholder="Filter tags by name..." aria-label="Filter tags" style="width: 100%;" />
         </div>
         <div id="tagsListArea" class="table-container">
           <div style="text-align: center; padding: 2rem;"><span class="spinner"></span></div>
         </div>
+        <div id="tagsPaginationBar" style="margin-top: 0.75rem;"></div>
       </div>
     </div>
 
@@ -825,16 +834,47 @@ export async function renderTaxonomyManager(container, routeContext) {
   container.innerHTML = wrapAdminLayout('/admin/taxonomy', 'Taxonomy & Classification', html);
 
   const modalRoot = container.querySelector('#taxonomyModalRoot');
+  const tagSearchInput = container.querySelector('#taxonomyTagSearchInput');
+  const tagsTotalBadge = container.querySelector('#tagsTotalBadge');
+  const tagsPaginationBar = container.querySelector('#tagsPaginationBar');
 
-  async function loadTaxonomies() {
+  let loadGeneration = 0;
+  let tagPage = 1;
+  const tagPageSize = 50;
+  let tagQuery = '';
+  let tagSearchTimer = null;
+
+  async function loadTaxonomies(clampAttempt = 0) {
+    const gen = ++loadGeneration;
+    const catArea = container.querySelector('#categoriesListArea');
+    const tagArea = container.querySelector('#tagsListArea');
+
+    if (catArea && !catArea.querySelector('table')) {
+      catArea.innerHTML = '<div style="text-align: center; padding: 2rem;"><span class="spinner" aria-label="Loading categories..."></span></div>';
+    }
+    if (tagArea && clampAttempt === 0) {
+      tagArea.innerHTML = '<div style="text-align: center; padding: 2rem;"><span class="spinner" aria-label="Loading tags..."></span></div>';
+    }
+
     try {
       const [catsRes, tagsRes] = await Promise.all([
         api('/admin/categories', { query: { page: 1, page_size: 100 }, signal }),
-        api('/admin/tags', { query: { page: 1, page_size: 100 }, signal }),
+        api('/admin/tags', { query: { q: tagQuery || undefined, page: tagPage, page_size: tagPageSize }, signal }),
       ]);
 
+      if (signal?.aborted || gen !== loadGeneration) return;
+
+      const totalTags = Number(tagsRes.total ?? (tagsRes.items ? tagsRes.items.length : 0));
+      const totalPages = totalTags > 0 ? Math.max(1, Math.ceil(totalTags / tagPageSize)) : 1;
+
+      if (totalTags === 0) {
+        tagPage = 1;
+      } else if ((!tagsRes.items || tagsRes.items.length === 0) && tagPage > totalPages && clampAttempt < 2) {
+        tagPage = totalPages;
+        return await loadTaxonomies(clampAttempt + 1);
+      }
+
       // Categories Table
-      const catArea = container.querySelector('#categoriesListArea');
       if (!catsRes.items || catsRes.items.length === 0) {
         catArea.innerHTML = '<div class="empty-state" style="padding: 1.5rem; text-align: center;">No categories configured.</div>';
       } else {
@@ -863,10 +903,15 @@ export async function renderTaxonomyManager(container, routeContext) {
         `;
       }
 
-      // Tags Table
-      const tagArea = container.querySelector('#tagsListArea');
+      // Tags Table & Pagination (R07 / R3-03 clamped)
+      if (tagsTotalBadge) {
+        tagsTotalBadge.textContent = String(totalTags);
+        tagsTotalBadge.style.display = 'inline-block';
+      }
+
       if (!tagsRes.items || tagsRes.items.length === 0) {
-        tagArea.innerHTML = '<div class="empty-state" style="padding: 1.5rem; text-align: center;">No tags configured.</div>';
+        tagArea.innerHTML = `<div class="empty-state" style="padding: 1.5rem; text-align: center;">${tagQuery ? 'No tags match your filter.' : 'No tags configured.'}</div>`;
+        if (tagsPaginationBar) tagsPaginationBar.innerHTML = '';
       } else {
         const tagRows = tagsRes.items.map(t => `
           <tr data-tag-id="${t.id}" data-tag-name="${escapeAttr(t.name)}" data-tag-slug="${escapeAttr(t.slug)}">
@@ -890,6 +935,26 @@ export async function renderTaxonomyManager(container, routeContext) {
             <tbody>${tagRows}</tbody>
           </table>
         `;
+
+        if (tagsPaginationBar) {
+          if (totalPages > 1) {
+            tagsPaginationBar.innerHTML = `
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                <span style="font-size: 0.8rem; color: var(--color-muted);">Page ${tagPage} of ${totalPages} (${totalTags} tags)</span>
+                <div style="display: flex; gap: 0.35rem;">
+                  <button type="button" class="btn btn-secondary btn-sm" id="tagsPrevPageBtn" ${tagPage <= 1 ? 'disabled' : ''}>Previous</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="tagsNextPageBtn" ${tagPage >= totalPages ? 'disabled' : ''}>Next</button>
+                </div>
+              </div>
+            `;
+            const prevBtn = tagsPaginationBar.querySelector('#tagsPrevPageBtn');
+            const nextBtn = tagsPaginationBar.querySelector('#tagsNextPageBtn');
+            if (prevBtn) prevBtn.onclick = () => { if (tagPage > 1) { tagPage -= 1; loadTaxonomies(); } };
+            if (nextBtn) nextBtn.onclick = () => { if (tagPage < totalPages) { tagPage += 1; loadTaxonomies(); } };
+          } else {
+            tagsPaginationBar.innerHTML = '';
+          }
+        }
       }
 
       // Bind Category Edit
@@ -976,9 +1041,36 @@ export async function renderTaxonomyManager(container, routeContext) {
       });
 
     } catch (err) {
-      if (signal?.aborted) return;
+      if (signal?.aborted || gen !== loadGeneration) return;
       console.error('Failed to load taxonomies:', err);
+      const errMsg = escapeText(err?.message || 'Unable to load taxonomy items.');
+      const renderPanelError = (panelId, retryBtnId) => {
+        const area = container.querySelector(panelId);
+        if (!area) return;
+        area.innerHTML = `
+          <div class="notice notice-error" role="alert" style="margin: 0.75rem;">
+            <p style="margin: 0 0 0.5rem 0;"><strong>Failed to load taxonomy:</strong> ${errMsg}</p>
+            <button type="button" class="btn btn-secondary btn-sm" id="${retryBtnId}">Retry Loading</button>
+          </div>
+        `;
+        const retryBtn = area.querySelector(`#${retryBtnId}`);
+        if (retryBtn) retryBtn.onclick = () => loadTaxonomies();
+      };
+      renderPanelError('#categoriesListArea', 'retryCategoriesLoadBtn');
+      renderPanelError('#tagsListArea', 'retryTagsLoadBtn');
+      if (tagsPaginationBar) tagsPaginationBar.innerHTML = '';
     }
+  }
+
+  if (tagSearchInput) {
+    tagSearchInput.oninput = () => {
+      clearTimeout(tagSearchTimer);
+      tagSearchTimer = setTimeout(() => {
+        tagQuery = tagSearchInput.value.trim();
+        tagPage = 1;
+        loadTaxonomies();
+      }, 150);
+    };
   }
 
   // Modal helper for Category Create/Edit

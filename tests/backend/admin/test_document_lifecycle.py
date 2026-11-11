@@ -167,3 +167,78 @@ def test_document_full_lifecycle_and_validation(client, db_session):
         f"/api/v1/admin/documents/{doc_id}",
         headers={"X-CSRF-Token": csrf}
     ).status_code == 404
+
+
+def test_r12_patch_source_url_conflict_with_tags_and_soft_deleted_returns_409_atomically(client, db_session):
+    """
+    R12 / B03:
+    PATCH /api/v1/admin/documents/{id} with a conflicting source_url (including when tag_ids
+    is also updated or when the conflicting document is soft-deleted) returns 409 SOURCE_URL_CONFLICT
+    with zero partial tag or field mutation.
+    """
+    import uuid
+    csrf = auth_login(client, "content@folio.test")
+    cat = db_session.query(Category).first()
+    tags = db_session.query(Tag).limit(2).all()
+    assert len(tags) >= 2
+    t1, t2 = tags[0], tags[1]
+
+    url_live = f"https://example.org/wiki/r12-live-{uuid.uuid4().hex[:8]}"
+    url_deleted = f"https://example.org/wiki/r12-del-{uuid.uuid4().hex[:8]}"
+
+    d_live = Document(
+        title="R12 Live Owner",
+        content="Content live",
+        summary="Summary live",
+        category_id=cat.id,
+        status="draft",
+        source_url=url_live,
+    )
+    d_target = Document(
+        title="R12 Target Doc",
+        content="Content target",
+        summary="Summary target",
+        category_id=cat.id,
+        status="draft",
+        source_url=f"https://example.org/wiki/r12-orig-{uuid.uuid4().hex[:8]}",
+    )
+    d_deleted = Document(
+        title="R12 Soft Deleted Owner",
+        content="Content deleted",
+        summary="Summary deleted",
+        category_id=cat.id,
+        status="draft",
+        source_url=url_deleted,
+    )
+    db_session.add_all([d_live, d_target, d_deleted])
+    db_session.flush()
+    from src.backend.models.document import DocumentTag
+    db_session.add(DocumentTag(document_id=d_target.id, tag_id=t1.id))
+    db_session.commit()
+
+    # Soft-delete d_deleted via API
+    del_res = client.delete(f"/api/v1/admin/documents/{d_deleted.id}", headers={"X-CSRF-Token": csrf})
+    assert del_res.status_code == 204
+
+    # 1. PATCH d_target with url_live AND new tag_ids=[t2.id] -> must return 409 and NOT overwrite tags
+    patch_live_conflict = client.patch(
+        f"/api/v1/admin/documents/{d_target.id}",
+        headers={"X-CSRF-Token": csrf},
+        json={"source_url": url_live, "tag_ids": [t2.id], "title": "Should Not Persist"},
+    )
+    assert patch_live_conflict.status_code == 409
+    assert patch_live_conflict.json()["error"]["code"] == "SOURCE_URL_CONFLICT"
+
+    # Verify d_target still has original tag [t1.id] and original title
+    refreshed = client.get(f"/api/v1/admin/documents/{d_target.id}").json()
+    assert refreshed["title"] == "R12 Target Doc"
+    assert [t["id"] for t in refreshed["tags"]] == [t1.id]
+
+    # 2. PATCH d_target with url_deleted (soft-deleted doc's source_url) -> must return 409 cleanly (not 500)
+    patch_deleted_conflict = client.patch(
+        f"/api/v1/admin/documents/{d_target.id}",
+        headers={"X-CSRF-Token": csrf},
+        json={"source_url": url_deleted, "tag_ids": [t2.id]},
+    )
+    assert patch_deleted_conflict.status_code == 409
+    assert patch_deleted_conflict.json()["error"]["code"] == "SOURCE_URL_CONFLICT"

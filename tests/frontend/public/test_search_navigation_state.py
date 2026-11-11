@@ -20,10 +20,14 @@ def test_search_api_connected_on_query(live_server, browser_instance):
     page.goto(f"{live_server}/#/library")
     page.wait_for_selector(".document-card-row")
 
-    # 1. Perform search query
+    # 1. Perform search query and synchronize on the actual /api/v1/search response
     search_input = page.locator("#librarySearchInput")
     search_input.fill("learning")
-    page.locator("#librarySearchBtn").click()
+    with page.expect_response(
+        lambda res: "/api/v1/search" in res.url and "q=learning" in res.url and res.status == 200,
+        timeout=10000,
+    ):
+        page.locator("#librarySearchBtn").click()
 
     # URL hash must contain query
     page.wait_for_url("**/#/library?**q=learning**")
@@ -40,16 +44,24 @@ def test_search_api_connected_on_query(live_server, browser_instance):
     assert page.locator(".doc-rank-badge").first.is_visible()
     assert "#1" in page.locator(".doc-rank-badge").first.text_content()
 
-    # 2. Change Retrieval Mode to 'semantic'
+    # 2. Change Retrieval Mode to 'semantic' and synchronize on response
     mode_select = page.locator("#libraryModeSelect")
-    mode_select.select_option("semantic")
+    with page.expect_response(
+        lambda res: "/api/v1/search" in res.url and "mode=semantic" in res.url and res.status == 200,
+        timeout=10000,
+    ):
+        mode_select.select_option("semantic")
     page.wait_for_url("**/#/library?**mode=semantic**")
     page.wait_for_selector(".document-card-row")
 
     assert any("/api/v1/search" in url and "mode=semantic" in url for url in search_requests)
 
-    # 3. Change Retrieval Mode to 'hybrid'
-    mode_select.select_option("hybrid")
+    # 3. Change Retrieval Mode to 'hybrid' and synchronize on response
+    with page.expect_response(
+        lambda res: "/api/v1/search" in res.url and "mode=hybrid" in res.url and res.status == 200,
+        timeout=10000,
+    ):
+        mode_select.select_option("hybrid")
     page.wait_for_url("**/#/library?**mode=hybrid**")
     page.wait_for_selector(".document-card-row")
 

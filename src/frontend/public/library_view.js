@@ -214,7 +214,8 @@ function syncLibraryControlsAndChips(instance, queryParams) {
   const tagIds = instance.currentQuery.get('tag_ids') || '';
   const dateFrom = instance.currentQuery.get('date_from') || '';
   const dateTo = instance.currentQuery.get('date_to') || '';
-  const sort = instance.currentQuery.get('sort') || 'newest';
+  const rawSort = instance.currentQuery.get('sort') || 'newest';
+  const sort = rawSort === 'title_asc' ? 'title' : rawSort;
 
   instance.currentCategoryId = categoryId;
   const isSearchMode = Boolean(q);

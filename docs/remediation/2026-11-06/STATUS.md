@@ -1,5 +1,8 @@
 # Folio — Báo Cáo Nghiệm Thu & Khắc Phục Sau Audit (06/11/2026)
 
+> [!CAUTION]
+> **ĐÍNH CHÍNH (ERRATA — 10/11/2026):** Báo cáo vòng 1 dưới đây (tại commit `b659fe5`) đã được review độc lập phát hiện nhiều khẳng định `FIXED` / `100% Green` chưa có bằng chứng kiểm chứng đầy đủ hoặc còn tái hiện lỗi trên PostgreSQL/Chromium thực (`R01`–`R18`, `B07`, `EXT-01/02`, `OPS-01/02/03/05`). Nội dung lịch sử bên dưới được giữ nguyên để đối chiếu; xem báo cáo cập nhật và bằng chứng thực tế tại **[docs/remediation/round-2/STATUS.md](../round-2/STATUS.md)**, **[docs/remediation/round-2/TEST-RESULTS.md](../round-2/TEST-RESULTS.md)** và **[docs/remediation/round-2/RELEASE-RUNBOOK.md](../round-2/RELEASE-RUNBOOK.md)**.
+
 - **Source SHA cơ sở:** `e2cbeb95a9abd47ade38a21d884ae973ea63e1bc` (origin/main)
 - **Branch làm việc:** `codex/folio-audit-remediation-20261106`
 - **Worktree cô lập:** `F:/dpl13.10/folio-audit-remediation`

@@ -173,26 +173,27 @@ def login(
     rate_limit_user_key = build_login_target_key(client_ip, normalized_email)
     rate_limit_ip_key = build_login_ip_key(client_ip)
 
+    reservation_token: Optional[str] = None
+    reservation_handled = False
+
     if settings.RATE_LIMIT_ENABLED:
         try:
-            target_res = rate_limiter.check_login_rate_limit(
-                rate_limit_user_key,
-                max_failed=settings.RATE_LIMIT_LOGIN_MAX_FAILED,
+            admission = rate_limiter.reserve_login_attempt(
+                target_identifier=rate_limit_user_key,
+                ip_identifier=rate_limit_ip_key,
+                max_target_failed=settings.RATE_LIMIT_LOGIN_MAX_FAILED,
+                max_ip_failed=settings.RATE_LIMIT_LOGIN_MAX_FAILED * 3,
                 window_seconds=settings.RATE_LIMIT_LOGIN_WINDOW_SECONDS,
             )
-            ip_res = rate_limiter.check_login_rate_limit(
-                rate_limit_ip_key,
-                max_failed=settings.RATE_LIMIT_LOGIN_MAX_FAILED * 3,
-                window_seconds=settings.RATE_LIMIT_LOGIN_WINDOW_SECONDS,
-            )
-            if not target_res or not ip_res:
-                retry_after = max(target_res.retry_after, ip_res.retry_after, 1)
+            if not admission:
+                retry_after = max(admission.retry_after, 1)
                 raise AppException(
                     status_code=429,
                     code="TOO_MANY_REQUESTS",
                     message="Too many failed login attempts. Please wait before trying again.",
                     headers={"Retry-After": str(retry_after)},
                 )
+            reservation_token = admission.reservation_token
         except RateLimitStoreUnavailableError as exc:
             raise AppException(
                 status_code=503,
@@ -200,51 +201,79 @@ def login(
                 message="Authentication rate-limiting service temporarily unavailable. Please try again later.",
             ) from exc
 
-    user = db.query(User).filter(func.lower(User.email) == normalized_email).first()
+    try:
+        user = db.query(User).filter(func.lower(User.email) == normalized_email).first()
 
-    if not user or not verify_password(data.password, user.password_hash):
+        if not user or not verify_password(data.password, user.password_hash):
+            if settings.RATE_LIMIT_ENABLED:
+                try:
+                    rate_limiter.commit_login_reservation_failure(
+                        [rate_limit_user_key, rate_limit_ip_key],
+                        reservation_token=reservation_token,
+                        window_seconds=settings.RATE_LIMIT_LOGIN_WINDOW_SECONDS,
+                    )
+                    reservation_handled = True
+                except RateLimitStoreUnavailableError as exc:
+                    raise AppException(
+                        status_code=503,
+                        code="RATE_LIMIT_UNAVAILABLE",
+                        message="Authentication rate-limiting service temporarily unavailable. Please try again later.",
+                    ) from exc
+            raise AppException(
+                status_code=401,
+                code="INVALID_CREDENTIALS",
+                message="Invalid email or password",
+            )
+
+        if not user.is_active:
+            if settings.RATE_LIMIT_ENABLED and reservation_token:
+                try:
+                    rate_limiter.release_login_reservation(
+                        [rate_limit_user_key, rate_limit_ip_key],
+                        reservation_token=reservation_token,
+                        window_seconds=settings.RATE_LIMIT_LOGIN_WINDOW_SECONDS,
+                    )
+                    reservation_handled = True
+                except RateLimitStoreUnavailableError:
+                    pass
+            raise AppException(
+                status_code=403,
+                code="ACCOUNT_DISABLED",
+                message="Your account has been deactivated",
+            )
+
+        # Successful login: reset failed login attempts for this target account only.
+        # Note: rate_limit_ip_key failures are preserved; only the in-flight reservation is released.
         if settings.RATE_LIMIT_ENABLED:
             try:
-                rate_limiter.record_failed_logins(
-                    [rate_limit_user_key, rate_limit_ip_key],
+                rate_limiter.commit_login_reservation_success(
+                    target_identifier=rate_limit_user_key,
+                    ip_identifier=rate_limit_ip_key,
+                    reservation_token=reservation_token,
                     window_seconds=settings.RATE_LIMIT_LOGIN_WINDOW_SECONDS,
                 )
-            except RateLimitStoreUnavailableError as exc:
-                raise AppException(
-                    status_code=503,
-                    code="RATE_LIMIT_UNAVAILABLE",
-                    message="Authentication rate-limiting service temporarily unavailable. Please try again later.",
-                ) from exc
-        raise AppException(
-            status_code=401,
-            code="INVALID_CREDENTIALS",
-            message="Invalid email or password",
+                reservation_handled = True
+            except RateLimitStoreUnavailableError:
+                pass
+
+        new_session, raw_token = rotate_session(db, ctx.session, user=user)
+        db.commit()
+        set_session_cookie(response, raw_token)
+
+        return SessionResponse(
+            user=user_to_user_self(user, db),
+            csrf_token=new_session.csrf_token,
         )
-
-    if not user.is_active:
-        raise AppException(
-            status_code=403,
-            code="ACCOUNT_DISABLED",
-            message="Your account has been deactivated",
-        )
-
-    # Successful login: reset failed login attempts for this target account only.
-    # Note: rate_limit_ip_key is deliberately NOT reset here!
-    # Success on one account must not wipe IP-wide abuse limits or other account counters.
-    if settings.RATE_LIMIT_ENABLED:
-        try:
-            rate_limiter.record_successful_login(rate_limit_user_key)
-        except RateLimitStoreUnavailableError:
-            pass
-
-    new_session, raw_token = rotate_session(db, ctx.session, user=user)
-    db.commit()
-    set_session_cookie(response, raw_token)
-
-    return SessionResponse(
-        user=user_to_user_self(user, db),
-        csrf_token=new_session.csrf_token,
-    )
+    finally:
+        if settings.RATE_LIMIT_ENABLED and reservation_token and not reservation_handled:
+            try:
+                rate_limiter.release_login_reservation(
+                    [rate_limit_user_key, rate_limit_ip_key],
+                    reservation_token=reservation_token,
+                    window_seconds=settings.RATE_LIMIT_LOGIN_WINDOW_SECONDS,
+                )
+            except Exception:
+                pass
 
 @router.post("/logout", response_model=SessionResponse)
 def logout(

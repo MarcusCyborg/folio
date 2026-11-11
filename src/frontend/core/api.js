@@ -12,6 +12,7 @@ export class ApiError extends Error {
 }
 
 let currentCsrfToken = '';
+let authMutationHook = null;
 
 export function setCsrfToken(token) {
   currentCsrfToken = token || '';
@@ -19,6 +20,10 @@ export function setCsrfToken(token) {
 
 export function getCsrfToken() {
   return currentCsrfToken;
+}
+
+export function registerAuthMutationHook(fn) {
+  authMutationHook = typeof fn === 'function' ? fn : null;
 }
 
 export async function api(path, { method = 'GET', query, body, signal } = {}) {
@@ -67,6 +72,9 @@ export async function api(path, { method = 'GET', query, body, signal } = {}) {
     }
 
     if (res.status === 204) {
+      if (isUnsafeMethod && /^\/api\/v1\/auth\/(login|register|logout|password)$/.test(basePath) && authMutationHook) {
+        try { authMutationHook(basePath); } catch (_) {}
+      }
       return null;
     }
 
@@ -100,6 +108,10 @@ export async function api(path, { method = 'GET', query, body, signal } = {}) {
     // If response body contains csrf_token, keep updated
     if (isJson && data && typeof data === 'object' && data.csrf_token) {
       setCsrfToken(data.csrf_token);
+    }
+
+    if (isUnsafeMethod && /^\/api\/v1\/auth\/(login|register|logout|password)$/.test(basePath) && authMutationHook) {
+      try { authMutationHook(basePath); } catch (_) {}
     }
 
     return data;

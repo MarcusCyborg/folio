@@ -49,6 +49,7 @@ test_backend/
 # Local Data, Volumes & Backups
 data/
 backups/
+docker/proxy/certs/
 *.log
 *.sqlite
 *.db

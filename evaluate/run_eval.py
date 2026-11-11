@@ -28,6 +28,7 @@ except Exception:
 import time
 import math
 import json
+import hashlib
 try:
     import psutil
 except ImportError:
@@ -223,6 +224,159 @@ def compute_ndcg_at_k(retrieved_ids: List[str], relevant_qrels: Dict[str, int], 
 # 2. VALIDATION & COVERAGE CHECKER
 # ==============================================================================
 
+class CorpusAlignmentError(RuntimeError):
+    """Raised when the PostgreSQL corpus state diverges from the declared benchmark manifest."""
+
+
+def _canonical_text(value: Optional[str]) -> str:
+    return (value or "").replace("\r\n", "\n")
+
+
+def _sha256_text(value: Optional[str]) -> str:
+    return hashlib.sha256(_canonical_text(value).encode("utf-8")).hexdigest()
+
+
+def compute_corpus_digest_sha256(manifest: Dict[str, Any]) -> str:
+    """Computes deterministic SHA-256 provenance digest over sorted manifest document revisions."""
+    canonical_entries = []
+    for doc in sorted(manifest.get("documents", []), key=lambda d: str(d.get("id", ""))):
+        canonical_entries.append(
+            f"{doc.get('id', '')}:{doc.get('status', '')}:{doc.get('content_sha256', '')}"
+        )
+    payload = "\n".join(canonical_entries).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def verify_corpus_db_alignment(db, manifest: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Performs order-independent verification between the declared corpus manifest
+    and live PostgreSQL Document rows (canonical IDs, statuses, titles, summaries,
+    and content SHA-256 digests).
+    """
+    from src.backend.models.document import Document
+
+    manifest_docs = manifest.get("documents", [])
+    manifest_pub: Dict[str, Dict[str, Any]] = {}
+    manifest_draft: Dict[str, Dict[str, Any]] = {}
+    duplicate_manifest_ids: Set[str] = set()
+    metadata_mismatches: Set[str] = set()
+    content_mismatches: Set[str] = set()
+
+    seen_manifest_ids: Set[str] = set()
+    for entry in manifest_docs:
+        doc_id = str(entry.get("id", "")).strip()
+        if not doc_id:
+            metadata_mismatches.add("<missing-id>")
+            continue
+        if doc_id in seen_manifest_ids:
+            duplicate_manifest_ids.add(doc_id)
+        seen_manifest_ids.add(doc_id)
+
+        status = entry.get("status")
+        if status == "published":
+            manifest_pub[doc_id] = entry
+        elif status == "draft":
+            manifest_draft[doc_id] = entry
+        else:
+            metadata_mismatches.add(doc_id)
+
+    active_rows = db.query(Document).filter(Document.deleted_at.is_(None)).all()
+    db_pub: Dict[str, Document] = {}
+    db_draft: Dict[str, Document] = {}
+    extra_other_status_ids: Set[str] = set()
+    db_digest_entries: List[Dict[str, str]] = []
+
+    for row in active_rows:
+        row_id = str(row.id)
+        if row.status == "published":
+            db_pub[row_id] = row
+        elif row.status == "draft":
+            db_draft[row_id] = row
+        else:
+            extra_other_status_ids.add(row_id)
+
+        db_digest_entries.append(
+            {
+                "id": row_id,
+                "status": row.status,
+                "content_sha256": _sha256_text(row.content),
+            }
+        )
+
+    missing_published_ids = sorted(set(manifest_pub.keys()) - set(db_pub.keys()))
+    extra_published_ids = sorted(set(db_pub.keys()) - set(manifest_pub.keys()))
+    missing_draft_ids = sorted(set(manifest_draft.keys()) - set(db_draft.keys()))
+    extra_draft_ids = sorted(set(db_draft.keys()) - set(manifest_draft.keys()))
+
+    for doc_id in set(manifest_pub.keys()) & set(db_pub.keys()):
+        m_doc = manifest_pub[doc_id]
+        db_doc = db_pub[doc_id]
+        db_content = _canonical_text(db_doc.content)
+        if "content_sha256" in m_doc and _sha256_text(db_content) != m_doc["content_sha256"]:
+            content_mismatches.add(doc_id)
+        if "content_length" in m_doc and len(db_content) != int(m_doc["content_length"]):
+            content_mismatches.add(doc_id)
+        if "title" in m_doc and _canonical_text(db_doc.title) != _canonical_text(m_doc["title"]):
+            metadata_mismatches.add(doc_id)
+        if "title_sha256" in m_doc and _sha256_text(db_doc.title) != m_doc["title_sha256"]:
+            metadata_mismatches.add(doc_id)
+        if "summary_sha256" in m_doc and _sha256_text(db_doc.summary) != m_doc["summary_sha256"]:
+            metadata_mismatches.add(doc_id)
+
+    for doc_id in set(manifest_draft.keys()) & set(db_draft.keys()):
+        m_doc = manifest_draft[doc_id]
+        db_doc = db_draft[doc_id]
+        db_content = _canonical_text(db_doc.content)
+        if "content_sha256" in m_doc and _sha256_text(db_content) != m_doc["content_sha256"]:
+            content_mismatches.add(doc_id)
+        if "content_length" in m_doc and len(db_content) != int(m_doc["content_length"]):
+            content_mismatches.add(doc_id)
+        if "title" in m_doc and _canonical_text(db_doc.title) != _canonical_text(m_doc["title"]):
+            metadata_mismatches.add(doc_id)
+        if "title_sha256" in m_doc and _sha256_text(db_doc.title) != m_doc["title_sha256"]:
+            metadata_mismatches.add(doc_id)
+        if "summary_sha256" in m_doc and _sha256_text(db_doc.summary) != m_doc["summary_sha256"]:
+            metadata_mismatches.add(doc_id)
+
+    manifest_digest_sha256 = compute_corpus_digest_sha256(manifest)
+    db_corpus_digest_sha256 = compute_corpus_digest_sha256({"documents": db_digest_entries})
+    all_have_content_hash = bool(manifest_docs) and all("content_sha256" in d for d in manifest_docs)
+    digest_match = (manifest_digest_sha256 == db_corpus_digest_sha256) if all_have_content_hash else True
+
+    aligned = (
+        not duplicate_manifest_ids
+        and not missing_published_ids
+        and not extra_published_ids
+        and not missing_draft_ids
+        and not extra_draft_ids
+        and not extra_other_status_ids
+        and not content_mismatches
+        and not metadata_mismatches
+        and digest_match
+    )
+
+    return {
+        "aligned": aligned,
+        "status": "MATCH" if aligned else "MISMATCH",
+        "manifest_total": len(manifest_docs),
+        "manifest_published_count": len(manifest_pub),
+        "manifest_draft_count": len(manifest_draft),
+        "db_published_count": len(db_pub),
+        "db_draft_count": len(db_draft),
+        "manifest_digest_sha256": manifest_digest_sha256,
+        "db_corpus_digest_sha256": db_corpus_digest_sha256,
+        "digest_match": digest_match,
+        "duplicate_manifest_ids": sorted(duplicate_manifest_ids),
+        "missing_published_ids": missing_published_ids,
+        "extra_published_ids": extra_published_ids,
+        "missing_draft_ids": missing_draft_ids,
+        "extra_draft_ids": extra_draft_ids,
+        "extra_other_status_ids": sorted(extra_other_status_ids),
+        "content_mismatches": sorted(content_mismatches),
+        "metadata_mismatches": sorted(metadata_mismatches),
+    }
+
+
 class BenchmarkValidator:
     """Validates corpus manifest, queries, and qrels consistency and calculates oracle bounds."""
 
@@ -303,6 +457,9 @@ class BenchmarkValidator:
             "valid": len(self.errors) == 0,
             "errors": self.errors,
             "warnings": self.warnings,
+            "corpus_id": self.manifest.get("manifest_id") or "unknown",
+            "corpus_digest_sha256": compute_corpus_digest_sha256(self.manifest),
+            "fixture_sha256": self.manifest.get("fixture_sha256"),
             "total_documents_manifest": len(doc_map),
             "published_documents": len(published_ids),
             "draft_documents": len(draft_ids),
@@ -349,7 +506,10 @@ class RetrievalEvaluator:
         active_gen = GenerationManager.get_active_generation(self.db)
         self.generation_id = index_generation_id or (active_gen.id if active_gen else None)
         if self.generation_id:
-            self.index = self.service.engine.get_or_load_index(self.generation_id)
+            try:
+                self.index = self.service.engine.get_or_load_index(self.generation_id)
+            except Exception:
+                self.index = None
         else:
             self.index = None
 
@@ -357,7 +517,7 @@ class RetrievalEvaluator:
         """Executes PostgreSQL ILIKE baseline."""
         session = db or self.db
         t0 = time.perf_counter()
-        hits = self.service._execute_ilike_fallback(
+        hits, _ = self.service._execute_ilike_fallback(
             db=session,
             query_str=query_str,
             top_k=top_k,
@@ -829,6 +989,8 @@ def run_evaluation(
     run_benchmarks: bool = True,
     validate_only: bool = False,
     selected_engines: Optional[List[str]] = None,
+    db=None,
+    allow_corpus_mismatch: bool = False,
 ) -> Dict[str, Any]:
     """Runs complete end-to-end evaluation and exports artifacts."""
     commit_sha = resolve_git_commit_sha()
@@ -881,15 +1043,44 @@ def run_evaluation(
         eval_queries = all_queries
 
     print(f"[STEP 2/5] INITIALIZING EVALUATOR (Evaluating {len(eval_queries)} queries in split='{split}', K={k})")
-    from src.backend.core.database import SessionLocal
-    db = SessionLocal()
+    should_close_db = False
+    if db is None:
+        from src.backend.core.database import SessionLocal
+        db = SessionLocal()
+        should_close_db = True
 
     evaluator = RetrievalEvaluator(db)
     sem_avail, sem_error = evaluator.service.adapter.check_availability()
     sem_env_status = "READY" if sem_avail else "BLOCKED_ENV"
     latency_boundaries = build_latency_boundaries(sem_avail, sem_error)
 
-    print(f"  Active Index Generation: {evaluator.generation_id}")
+    from src.backend.search_index.manager import GenerationManager
+    active_gen_obj = GenerationManager.get_active_generation(db)
+    alignment_report = verify_corpus_db_alignment(db, manifest)
+    db_published_count = alignment_report["db_published_count"]
+    corpus_db_alignment = alignment_report["status"]
+    verification_status = "VERIFIED_MATCH" if alignment_report["aligned"] else "INVALID_MISMATCH"
+
+    if not alignment_report["aligned"]:
+        mismatch_summary = (
+            f"Corpus/DB alignment MISMATCH: "
+            f"missing_published={len(alignment_report['missing_published_ids'])}, "
+            f"extra_published={len(alignment_report['extra_published_ids'])}, "
+            f"missing_draft={len(alignment_report['missing_draft_ids'])}, "
+            f"extra_draft={len(alignment_report['extra_draft_ids'])}, "
+            f"content_mismatches={len(alignment_report['content_mismatches'])}, "
+            f"metadata_mismatches={len(alignment_report['metadata_mismatches'])}, "
+            f"digest_match={alignment_report['digest_match']}"
+        )
+        print(f"  ERROR: {mismatch_summary}")
+        if not allow_corpus_mismatch:
+            if should_close_db:
+                db.close()
+            raise CorpusAlignmentError(mismatch_summary)
+        print("  WARNING: Proceeding with INVALID_MISMATCH diagnostics because --allow-mismatch was requested.")
+
+    print(f"  Active Index Generation: {evaluator.generation_id} (num={active_gen_obj.generation_num if active_gen_obj else None})")
+    print(f"  Corpus Provenance      : id={val_report['corpus_id']} digest={val_report['corpus_digest_sha256'][:16]}... alignment={corpus_db_alignment} ({verification_status})")
     print(f"  Semantic Adapter Status: {(sem_avail, sem_error)} [{sem_env_status}]")
 
     # Determine engines to evaluate
@@ -1010,11 +1201,20 @@ def run_evaluation(
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "commit_sha": commit_sha,
             "commit_baseline": commit_sha,
+            "corpus_id": val_report["corpus_id"],
+            "corpus_digest_sha256": val_report["corpus_digest_sha256"],
+            "db_corpus_digest_sha256": alignment_report["db_corpus_digest_sha256"],
             "manifest_id": manifest.get("manifest_id"),
             "manifest_file": str(manifest_path),
             "manifest_sha256": manifest.get("fixture_sha256"),
             "analyzer_version": evaluator.analyzer.version,
             "index_generation_id": evaluator.generation_id,
+            "active_index_generation": evaluator.generation_id,
+            "active_index_generation_num": active_gen_obj.generation_num if active_gen_obj else None,
+            "db_published_documents": db_published_count,
+            "corpus_db_alignment": corpus_db_alignment,
+            "verification_status": verification_status,
+            "alignment_details": alignment_report,
             "embedding_model": "all-MiniLM-L6-v2",
             "semantic_environment_status": sem_env_status,
             "semantic_environment_reason": sem_error,
@@ -1071,7 +1271,8 @@ def run_evaluation(
         except Exception as plot_err:
             print(f"  Note: Chart export skipped: {plot_err}")
 
-    db.close()
+    if should_close_db:
+        db.close()
     return export_payload
 
 
@@ -1086,6 +1287,11 @@ def main():
     parser.add_argument("--engines", nargs="+", choices=["ilike", "tfidf", "bm25", "semantic", "hybrid"], default=None, help="Specific engines to evaluate")
     parser.add_argument("--skip-benchmarks", action="store_true", help="Skip resource and latency benchmarks")
     parser.add_argument("--validate-only", action="store_true", help="Only validate corpus/queries/qrels integrity")
+    parser.add_argument(
+        "--allow-mismatch",
+        action="store_true",
+        help="Allow diagnostic execution on corpus/DB mismatch (marks output verification_status=INVALID_MISMATCH)",
+    )
     parser.add_argument("--database-url", type=str, default=None, help="Override database URL (defaults to folio_eval)")
 
     args = parser.parse_args()
@@ -1110,6 +1316,7 @@ def main():
         run_benchmarks=not args.skip_benchmarks,
         validate_only=args.validate_only,
         selected_engines=args.engines,
+        allow_corpus_mismatch=args.allow_mismatch,
     )
 
 

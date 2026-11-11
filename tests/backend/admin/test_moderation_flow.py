@@ -129,3 +129,132 @@ def test_moderation_atomic_resolution_and_no_resurrect(client, db_session):
         headers={"X-CSRF-Token": csrf_mod},
         json={"suspended_until": None, "reason": "Suspension lifted"}
     )
+
+
+def test_r05_report_open_unique_migration_handles_equal_timestamps_and_concurrent_reports():
+    """
+    R05 / B08 REGRESSION (PostgreSQL):
+    - Preflight dry-run & Alembic upgrade cleanly deduplicate open reports even when created_at timestamps are equal
+      and >2 duplicates exist, preserving historical rows and recording an audit trail.
+    - Partial unique index uq_reports_open_comment_reporter prevents concurrent duplicate open reports,
+      returning HTTP 409 DUPLICATE_REPORT to the losing request while allowing new reports after resolution.
+    """
+    import importlib.util
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import sessionmaker
+    from tests.conftest import test_db_url
+    from src.backend.core.exceptions import AppException
+    from src.backend.services.library.engagement_service import report_comment
+    from src.backend.models.auth import User
+    from src.backend.models.comment import Comment, Report
+    from src.backend.models.document import Document
+
+    spec = importlib.util.spec_from_file_location(
+        "migration_20261106_report_open_unique",
+        "alembic/versions/20261106_report_open_unique.py",
+    )
+    mig = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mig)
+
+    engine = create_engine(test_db_url, pool_size=10, max_overflow=5)
+    SessionFactory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+
+    try:
+        with SessionFactory() as db:
+            doc = db.query(Document).filter(Document.status == "published").first()
+            reader = db.query(User).filter(User.username == "reader").first()
+            comment = Comment(
+                document_id=doc.id,
+                user_id=reader.id,
+                body="R05 migration and concurrency test comment",
+                status="visible",
+            )
+            db.add(comment)
+            db.commit()
+            comment_id = comment.id
+            reporter_id = reader.id
+
+        # 1. Drop partial index temporarily, insert historical closed report + 3 equal-timestamp open duplicates + 1 newer open duplicate
+        with engine.begin() as conn:
+            conn.execute(text("DROP INDEX IF EXISTS uq_reports_open_comment_reporter"))
+            equal_ts = "2026-11-06 00:00:00+00"
+            later_ts = "2026-11-06 00:05:00+00"
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO reports (id, comment_id, reporter_id, reason, status, resolution, created_at)
+                    VALUES
+                      ('r05_hist_closed', :cid, :rid, 'spam', 'resolved', 'earlier_closed', '2026-11-05 12:00:00+00'),
+                      ('r05_open_a', :cid, :rid, 'spam', 'open', NULL, :eq_ts),
+                      ('r05_open_b', :cid, :rid, 'abuse', 'open', NULL, :eq_ts),
+                      ('r05_open_c', :cid, :rid, 'other', 'open', NULL, :eq_ts),
+                      ('r05_open_d', :cid, :rid, 'spam', 'open', NULL, :lt_ts)
+                    """
+                ),
+                {"cid": comment_id, "rid": reporter_id, "eq_ts": equal_ts, "lt_ts": later_ts},
+            )
+
+            # Preflight dry-run check
+            dry_plan = mig.inspect_duplicate_open_reports(conn)
+            assert dry_plan["duplicate_rows_to_resolve"] == 3
+            assert set(dry_plan["duplicate_ids"]) == {"r05_open_b", "r05_open_c", "r05_open_d"}
+
+            # Execute actual Alembic migration upgrade()
+            mig.op = Operations(MigrationContext.configure(conn))
+            mig.upgrade()
+
+            # Verify canonical earliest open report ('r05_open_a') kept, 3 duplicates resolved without deleting rows
+            rows = conn.execute(
+                text("SELECT id, status, resolution FROM reports WHERE comment_id = :cid ORDER BY id ASC"),
+                {"cid": comment_id},
+            ).fetchall()
+            status_map = {r[0]: (r[1], r[2]) for r in rows}
+            assert len(rows) == 5, "No historical report rows may be deleted"
+            assert status_map["r05_hist_closed"] == ("resolved", "earlier_closed")
+            assert status_map["r05_open_a"] == ("open", None)
+            assert status_map["r05_open_b"] == ("resolved", "auto_merged_duplicate_open_report")
+            assert status_map["r05_open_c"] == ("resolved", "auto_merged_duplicate_open_report")
+            assert status_map["r05_open_d"] == ("resolved", "auto_merged_duplicate_open_report")
+
+            # Close r05_open_a so user can test concurrent reporting on a clean open slot
+            conn.execute(
+                text("UPDATE reports SET status = 'dismissed', resolution = 'cleared' WHERE id = 'r05_open_a'")
+            )
+
+        # 2. Two concurrent PostgreSQL sessions submit open reports simultaneously
+        barrier = threading.Barrier(2)
+
+        def submit_concurrent_report(idx: int):
+            with SessionFactory() as db:
+                user_obj = db.query(User).filter(User.id == reporter_id).first()
+                barrier.wait(timeout=10)
+                try:
+                    res = report_comment(db, comment_id, user_obj, reason="spam", details=f"concurrent-{idx}")
+                    return ("created", res["id"])
+                except AppException as exc:
+                    return ("conflict", exc.status_code, exc.code)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(submit_concurrent_report, [1, 2]))
+
+        created = [o for o in outcomes if o[0] == "created"]
+        conflicts = [o for o in outcomes if o[0] == "conflict"]
+        assert len(created) == 1, f"Expected exactly 1 created report, got {outcomes}"
+        assert len(conflicts) == 1 and conflicts[0] == ("conflict", 409, "DUPLICATE_REPORT")
+
+        with engine.connect() as conn:
+            open_count = conn.execute(
+                text("SELECT count(*) FROM reports WHERE comment_id = :cid AND reporter_id = :rid AND status = 'open'"),
+                {"cid": comment_id, "rid": reporter_id},
+            ).scalar()
+            assert open_count == 1
+    finally:
+        # Clean up test comment & reports so shared session DB stays pristine
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM audit_logs WHERE entity_id = '20261106_report_open_unique'"))
+            conn.execute(text("DELETE FROM comments WHERE body = 'R05 migration and concurrency test comment'"))
+        engine.dispose()

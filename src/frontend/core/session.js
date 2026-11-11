@@ -1,7 +1,9 @@
 // src/frontend/core/session.js
 // Client session state management and permissions checker
 
-import { api, setCsrfToken } from './api.js';
+import { api, setCsrfToken, registerAuthMutationHook } from './api.js';
+
+const TAB_ID = `${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
 let sessionState = {
   user: null,
@@ -16,8 +18,8 @@ try {
   if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
     authChannel = new BroadcastChannel('folio_auth_channel');
     authChannel.onmessage = (event) => {
-      if (event.data?.type === 'AUTH_STATE_CHANGED') {
-        refreshSession();
+      if (event.data?.type === 'AUTH_STATE_CHANGED' && event.data?.source !== TAB_ID) {
+        refreshSession({ broadcast: false });
       }
     };
   }
@@ -25,21 +27,43 @@ try {
 
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (e) => {
-    if (e.key === 'folio_auth_sync') {
-      refreshSession();
+    if (e.key === 'folio_auth_sync' && e.newValue) {
+      try {
+        const parsed = JSON.parse(e.newValue);
+        if (parsed && parsed.source === TAB_ID) return;
+      } catch (_) {}
+      refreshSession({ broadcast: false });
     }
   });
   window.addEventListener('focus', () => {
-    refreshSession();
+    refreshSession({ broadcast: false });
   });
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
-        refreshSession();
+        refreshSession({ broadcast: false });
       }
     });
   }
 }
+
+export function broadcastAuthChange() {
+  const payload = { type: 'AUTH_STATE_CHANGED', source: TAB_ID, ts: Date.now() };
+  try {
+    if (authChannel) {
+      authChannel.postMessage(payload);
+    }
+  } catch (_) {}
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('folio_auth_sync', JSON.stringify(payload));
+    }
+  } catch (_) {}
+}
+
+registerAuthMutationHook(() => {
+  broadcastAuthChange();
+});
 
 function emit() {
   const snapshot = getSession();
@@ -69,17 +93,14 @@ export function setSessionData(user, csrf_token, { broadcast = true } = {}) {
   setCsrfToken(csrf_token);
   emit();
   if (broadcast) {
-    try {
-      if (authChannel) authChannel.postMessage({ type: 'AUTH_STATE_CHANGED' });
-      localStorage.setItem('folio_auth_sync', String(Date.now()));
-    } catch (_) {}
+    broadcastAuthChange();
   }
 }
 
-export async function refreshSession() {
+export async function refreshSession({ broadcast = false } = {}) {
   try {
     const data = await api('/auth/session');
-    setSessionData(data.user, data.csrf_token, { broadcast: false });
+    setSessionData(data.user, data.csrf_token, { broadcast });
     return getSession();
   } catch (err) {
     console.warn('Failed to refresh session:', err);

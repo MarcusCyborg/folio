@@ -1,4 +1,4 @@
-﻿/* src/frontend/admin/admin.css */
+/* src/frontend/admin/admin.css */
 /* Folio Admin Lane Stylesheet — Desktop Optimized (1280x720, 1366x768, 1440x900, 1920x1080) */
 
 .admin-page {
@@ -420,9 +420,15 @@
 /* Taxonomy Grid Layout */
 .taxonomy-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 2rem;
   align-items: start;
+}
+.taxonomy-panel {
+  min-width: 0;
+}
+.taxonomy-panel .table {
+  min-width: 0;
 }
 .action-menu-divider {
   height: 1px;
@@ -476,9 +482,20 @@
     gap: 0.75rem;
   }
 
-    .taxonomy-grid {
-    grid-template-columns: 1fr !important;
+  .taxonomy-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
     gap: 1.25rem;
+  }
+  .taxonomy-panel {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .taxonomy-panel .panel-header {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .taxonomy-panel .table {
+    min-width: 0;
   }
   .admin-filter-group {
     max-width: 100% !important;

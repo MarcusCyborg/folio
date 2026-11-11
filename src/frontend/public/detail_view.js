@@ -6,6 +6,7 @@ import { getSession } from '../core/session.js';
 import { notify, confirmAction, renderError } from '../core/ui.js';
 import { navigate } from '../core/router.js';
 import { attachMentionsAutocomplete } from './mentions.js';
+import { renderMathInContainer } from '../core/math.js';
 import {
   prefetchedDocCache,
   clickedDocHint,
@@ -38,6 +39,32 @@ function getSafeHttpUrl(url) {
     return trimmed;
   }
   return null;
+}
+
+function extractHeadingLabel(headingEl) {
+  if (!headingEl) return '';
+  const clone = headingEl.cloneNode(true);
+  // Defense-in-depth: collapse any pre-rendered KaTeX DOM into a single TeX/visual representation
+  clone.querySelectorAll('.katex').forEach((katexEl) => {
+    const texAnn = katexEl.querySelector('annotation[encoding="application/x-tex"]');
+    const katexHtml = katexEl.querySelector('.katex-html');
+    const replacementText = texAnn ? texAnn.textContent : (katexHtml ? katexHtml.textContent : '');
+    katexEl.replaceWith(document.createTextNode(replacementText || ''));
+  });
+  // Unwrap sanitizer math delimiters so TOC labels and slugs remain clean without TeX delimiter noise
+  clone.querySelectorAll('.math-inline, .math-display').forEach((mathEl) => {
+    let text = (mathEl.textContent || '').trim();
+    if (mathEl.classList.contains('math-inline') && text.startsWith('\\(') && text.endsWith('\\)') && text.length >= 4) {
+      text = text.slice(2, -2).trim();
+    } else if (mathEl.classList.contains('math-display')) {
+      if ((text.startsWith('$$') && text.endsWith('$$') && text.length >= 4) ||
+          (text.startsWith('\\[') && text.endsWith('\\]') && text.length >= 4)) {
+        text = text.slice(2, -2).trim();
+      }
+    }
+    mathEl.replaceWith(document.createTextNode(text));
+  });
+  return (clone.textContent || '').replace(/\s+/g, ' ').trim();
 }
 
 export async function renderDocumentDetail(container, routeContext) {
@@ -318,7 +345,7 @@ export async function renderDocumentDetail(container, routeContext) {
       setSharedTitle(detailTitleEl, doc.id);
     }
 
-    // Generate Table of Contents from headings
+    // Generate Table of Contents from clean source headings BEFORE rendering KaTeX math (R3-07)
     const readingColumn = contentEl.querySelector('.document-reading-column');
     if (readingColumn) {
       const headings = readingColumn.querySelectorAll('h1, h2, h3');
@@ -327,7 +354,8 @@ export async function renderDocumentDetail(container, routeContext) {
         const usedSlugs = new Set();
 
         headings.forEach((h, idx) => {
-          let slug = h.textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+          const cleanLabel = extractHeadingLabel(h);
+          let slug = cleanLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
           if (!slug) slug = `section-${idx + 1}`;
           let finalSlug = slug;
           let counter = 1;
@@ -341,7 +369,7 @@ export async function renderDocumentDetail(container, routeContext) {
           const level = parseInt(h.tagName.substring(1), 10);
           tocItems.push(`
             <li class="toc-item toc-level-${level}">
-              <a href="#${finalSlug}">${escapeText(h.textContent.trim())}</a>
+              <a href="#${finalSlug}">${escapeText(cleanLabel || `Section ${idx + 1}`)}</a>
             </li>
           `);
         });
@@ -370,7 +398,19 @@ export async function renderDocumentDetail(container, routeContext) {
               targetEl.setAttribute('tabindex', '-1');
               targetEl.focus({ preventScroll: true });
 
+              let flashed = false;
+              let fallbackTimer = null;
+              let onScrollEnd = null;
               const triggerFlash = () => {
+                if (flashed) return;
+                flashed = true;
+                if (fallbackTimer) {
+                  clearTimeout(fallbackTimer);
+                  fallbackTimer = null;
+                }
+                if (onScrollEnd) {
+                  window.removeEventListener('scrollend', onScrollEnd);
+                }
                 targetEl.classList.remove('heading-target-flash');
                 void targetEl.offsetWidth;
                 targetEl.classList.add('heading-target-flash');
@@ -379,9 +419,11 @@ export async function renderDocumentDetail(container, routeContext) {
                 }, 800);
               };
 
-              // Trigger highlight arrival flash when arriving at target heading
+              // Trigger highlight arrival flash when arriving at target heading (with fallback if scroll delta is 0px)
               if ('onscrollend' in window) {
-                window.addEventListener('scrollend', triggerFlash, { once: true });
+                onScrollEnd = () => triggerFlash();
+                window.addEventListener('scrollend', onScrollEnd, { once: true });
+                fallbackTimer = setTimeout(triggerFlash, 180);
               } else {
                 const observer = new IntersectionObserver((entries) => {
                   if (entries[0] && entries[0].isIntersecting) {
@@ -390,15 +432,18 @@ export async function renderDocumentDetail(container, routeContext) {
                   }
                 }, { threshold: 0.3 });
                 observer.observe(targetEl);
-                setTimeout(() => {
+                fallbackTimer = setTimeout(() => {
                   observer.disconnect();
                   triggerFlash();
-                }, 600);
+                }, 180);
               }
             }
           });
         });
       }
+
+      // Render self-hosted KaTeX math in article body (after TOC label/slug extraction)
+      renderMathInContainer(readingColumn);
 
       // Reading Progress Bar at top of viewport
       let progressBar = document.getElementById('readingProgressBar');

@@ -133,3 +133,135 @@ def test_page_beyond_available_candidates(client: TestClient):
     data = res_beyond.json()
     assert data["items"] == []
     assert data["has_more"] is False
+
+
+def test_r3_06_ilike_fallback_paginates_past_1000_results_with_filters(client: TestClient, db_session: Session):
+    """
+    R3-06:
+    When SQL ILIKE fallback matches >1000 published documents (e.g., 1001),
+    snapshot_total and snapshot_candidate_count both reflect all 1001 matching documents,
+    page 10 (100 items) reports has_more=True, page 11 (1 item) returns rank 1001 with has_more=False,
+    zero duplicates/gaps occur across all 11 pages, draft/deleted docs stay excluded,
+    and fixed-rank live publication pruning still omits newly unpublished items without backfill.
+    """
+    import uuid
+    from datetime import datetime, timezone, timedelta
+    from unittest.mock import patch
+    from src.backend.models.document import Document
+    from src.backend.models.taxonomy import Category, Tag
+    from src.backend.models.document import DocumentTag
+    from src.backend.search_index.manager import GenerationManager
+
+    cat = db_session.query(Category).first()
+    tag = db_session.query(Tag).first()
+    assert cat is not None and tag is not None
+
+    marker = f"R3Scale1001_{uuid.uuid4().hex[:8]}"
+    base_dt = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+    published_rows = []
+    published_ids = []
+    for i in range(1001):
+        doc_id = str(uuid.uuid4())
+        published_ids.append(doc_id)
+        dt = base_dt - timedelta(seconds=i)
+        published_rows.append(
+            {
+                "id": doc_id,
+                "title": f"{marker} Entry {i:04d}",
+                "summary": f"Summary for {marker}",
+                "content": f"Body text matching {marker}",
+                "category_id": cat.id,
+                "status": "published",
+                "created_at": dt,
+                "published_at": dt,
+                "views_count": 0,
+            }
+        )
+
+    # Extra noise rows that match marker text/category/tag but MUST be excluded
+    draft_id = str(uuid.uuid4())
+    deleted_id = str(uuid.uuid4())
+    extra_rows = [
+        {
+            "id": draft_id,
+            "title": f"{marker} Draft Excluded",
+            "summary": "draft",
+            "content": marker,
+            "category_id": cat.id,
+            "status": "draft",
+            "created_at": base_dt,
+            "published_at": None,
+            "views_count": 0,
+        },
+        {
+            "id": deleted_id,
+            "title": f"{marker} Deleted Excluded",
+            "summary": "deleted",
+            "content": marker,
+            "category_id": cat.id,
+            "status": "published",
+            "created_at": base_dt,
+            "published_at": base_dt,
+            "deleted_at": base_dt,
+            "views_count": 0,
+        },
+    ]
+
+    db_session.bulk_insert_mappings(Document, published_rows + extra_rows)
+    db_session.bulk_insert_mappings(
+        DocumentTag,
+        [{"document_id": did, "tag_id": tag.id} for did in published_ids + [draft_id, deleted_id]],
+    )
+    db_session.commit()
+
+    with patch.object(GenerationManager, "get_active_generation", return_value=None):
+        res_p1 = client.get(
+            f"/api/v1/search?q={marker}&mode=bm25&page=1&page_size=100&category_id={cat.id}&tag_ids={tag.id}"
+        )
+        assert res_p1.status_code == 200
+        d1 = res_p1.json()
+        assert d1["engine_used"] == "ilike_fallback"
+        assert d1["snapshot_total"] == 1001
+        assert d1["snapshot_candidate_count"] == 1001
+        assert d1["has_more"] is True
+        assert len(d1["items"]) == 100
+
+        token = d1["search_context_token"]
+        seen_ids = [item["id"] for item in d1["items"]]
+        last_page_data = None
+
+        for p in range(2, 12):
+            res_p = client.get(
+                f"/api/v1/search?search_context_token={token}&page={p}&page_size=100"
+            )
+            assert res_p.status_code == 200
+            dp = res_p.json()
+            seen_ids.extend(item["id"] for item in dp["items"])
+            if p == 10:
+                assert len(dp["items"]) == 100
+                assert dp["has_more"] is True
+            elif p == 11:
+                last_page_data = dp
+
+        assert last_page_data is not None
+        assert len(last_page_data["items"]) == 1
+        assert last_page_data["items"][0]["rank"] == 1001
+        assert last_page_data["has_more"] is False
+        assert len(seen_ids) == 1001
+        assert len(set(seen_ids)) == 1001
+        assert set(seen_ids) == set(published_ids)
+        assert draft_id not in seen_ids
+        assert deleted_id not in seen_ids
+
+        # Live publication guard still omits the 1001st doc on fixed-rank re-fetch
+        doc_1001 = db_session.query(Document).filter(Document.id == last_page_data["items"][0]["id"]).first()
+        doc_1001.status = "draft"
+        db_session.commit()
+
+        res_p11_after = client.get(
+            f"/api/v1/search?search_context_token={token}&page=11&page_size=100"
+        )
+        assert res_p11_after.status_code == 200
+        assert res_p11_after.json()["items"] == []
+        assert res_p11_after.json()["has_more"] is False

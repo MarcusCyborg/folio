@@ -124,3 +124,36 @@ def test_tag_crud_slug_uniqueness_and_conflict(client, db_session):
         )
         assert del_used_tag.status_code == 409
         assert del_used_tag.json()["error"]["code"] == "TAG_IN_USE"
+
+
+def test_b07_admin_tags_filtered_total_and_pagination_beyond_100(client, db_session):
+    """R07 / B07: GET /api/v1/admin/tags?q= returns exact filtered total and paginates >100 tags."""
+    csrf = auth_login(client, "content@folio.test")
+    tags = [
+        Tag(name=f"BatchTag Alpha {i:03d}", slug=f"batchtag-alpha-{i:03d}")
+        for i in range(105)
+    ] + [
+        Tag(name=f"OtherTag Beta {i:03d}", slug=f"othertag-beta-{i:03d}")
+        for i in range(10)
+    ]
+    db_session.add_all(tags)
+    db_session.commit()
+
+    # Filtered query must return total=105 (not total across all tags)
+    res_filtered = client.get("/api/v1/admin/tags?q=BatchTag+Alpha&page=1&page_size=50")
+    assert res_filtered.status_code == 200
+    data1 = res_filtered.json()
+    assert data1["total"] == 105
+    assert len(data1["items"]) == 50
+
+    # Page 3 reaches items 101..105
+    res_page3 = client.get("/api/v1/admin/tags?q=BatchTag+Alpha&page=3&page_size=50")
+    assert res_page3.status_code == 200
+    data3 = res_page3.json()
+    assert data3["total"] == 105
+    assert len(data3["items"]) == 5
+
+    # Wildcard escaping on q
+    res_empty = client.get("/api/v1/admin/tags?q=BatchTag%25Alpha&page=1&page_size=50")
+    assert res_empty.status_code == 200
+    assert res_empty.json()["total"] == 0

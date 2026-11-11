@@ -42,12 +42,22 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH" \
     PYTHONPATH="/app" \
-    INDEX_STORAGE_DIR="/app/data/search_index/generations"
+    INDEX_STORAGE_DIR="/app/data/search_index/generations" \
+    MEDIA_DIR="/app/data/media"
 
-# Install minimal runtime libraries (libpq5 for psycopg, curl for health checks)
+# Install minimal runtime libraries (libpq5 for psycopg, curl for health checks,
+# and postgresql-client-16 from PGDG so pg_dump/psql match PostgreSQL 16 server)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 \
+    ca-certificates \
     curl \
+    gnupg \
+    libpq5 \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-16 \
+    && apt-get purge -y --auto-remove gnupg \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root dedicated application user and group (UID/GID 10001)
@@ -55,7 +65,7 @@ RUN groupadd -g 10001 folio && \
     useradd -u 10001 -g folio -m -s /bin/bash folio
 
 # Prepare application and data volume directories with proper non-root permissions
-RUN mkdir -p /app /app/data /app/data/search_index /app/data/search_index/generations /app/data/media /app/backups && \
+RUN mkdir -p /app /app/data /app/data/search_index /app/data/search_index/generations /app/data/media /app/backups /app/certs && \
     chown -R folio:folio /app
 
 # Copy virtual environment from builder stage

@@ -29,10 +29,18 @@ class IndexWorker:
         worker_id: Optional[str] = None,
         base_backoff_sec: float = 1.0,
         lock_timeout_sec: float = 300.0,
+        semantic_adapter: Optional[Any] = None,
     ):
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
         self.base_backoff_sec = base_backoff_sec
         self.lock_timeout_sec = lock_timeout_sec
+        self._semantic_adapter = semantic_adapter
+
+    def _get_semantic_adapter(self):
+        if self._semantic_adapter is None:
+            from src.backend.search.semantic import SemanticAdapter
+            self._semantic_adapter = SemanticAdapter()
+        return self._semantic_adapter
 
     @classmethod
     def get_metrics(cls, db: Session) -> Dict[str, Any]:
@@ -201,6 +209,14 @@ class IndexWorker:
                         "updated_at": (doc.updated_at or now).isoformat(),
                     },
                 )
+                self._get_semantic_adapter().upsert_document(
+                    doc_id=doc.id,
+                    title=doc.title,
+                    summary=doc.summary,
+                    content=doc.content,
+                    source_url=doc.source_url,
+                    revision_hash=job.revision_hash,
+                )
             else:
                 # Delete operation, draft status, or soft-deleted doc
                 if (storage.postings_dir / "index_stats.json").exists():
@@ -209,6 +225,7 @@ class IndexWorker:
                     inv_idx.delete_document(job.document_id)
                     inv_idx.save(storage.postings_dir)
                 storage.delete_document(job.document_id)
+                self._get_semantic_adapter().delete_document(job.document_id)
 
             # Mark completed
             job.state = "completed"

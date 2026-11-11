@@ -112,6 +112,21 @@ def admin_get_document(db: Session, doc_id: str) -> dict:
         "liked_by_me": False,
     }
 
+def _is_source_url_integrity_error(err: IntegrityError) -> bool:
+    orig = getattr(err, "orig", None)
+    sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    diag = getattr(orig, "diag", None)
+    constraint_name = (getattr(diag, "constraint_name", None) or "").lower()
+    err_msg = str(err).lower()
+    if "source_url" in constraint_name or "ix_documents_source_url" in constraint_name:
+        return True
+    if "source_url" in err_msg or "ix_documents_source_url" in err_msg:
+        return True
+    if sqlstate == "23505" and "documents" in err_msg and "source_url" in err_msg:
+        return True
+    return False
+
+
 def admin_create_document(db: Session, data: DocumentWrite, user: User) -> dict:
     cat = db.query(Category).filter(Category.id == data.category_id).first()
     if not cat:
@@ -132,22 +147,21 @@ def admin_create_document(db: Session, data: DocumentWrite, user: User) -> dict:
                 status_code=422,
                 code="INVALID_TAG_IDS",
                 message=f"The following tag IDs do not exist: {', '.join(missing_ids)}",
-                details={"missing_tag_ids": missing_ids}
+                fields={"tag_ids": [f"Missing tag IDs: {', '.join(missing_ids)}"]}
             )
 
-    # Pre-check source_url uniqueness if provided
+    # Pre-check source_url uniqueness across all rows (ix_documents_source_url covers all documents)
     clean_source_url = data.source_url.strip() if data.source_url and data.source_url.strip() else None
     if clean_source_url:
         existing_doc = db.query(Document).filter(
             Document.source_url == clean_source_url,
-            Document.deleted_at.is_(None)
         ).first()
         if existing_doc:
             raise AppException(
                 status_code=409,
                 code="SOURCE_URL_CONFLICT",
                 message="A document with this source URL already exists",
-                details={"field": "source_url"}
+                fields={"source_url": ["A document with this source URL already exists"]}
             )
 
     doc = Document(
@@ -170,13 +184,12 @@ def admin_create_document(db: Session, data: DocumentWrite, user: User) -> dict:
         db.flush()
     except IntegrityError as err:
         db.rollback()
-        err_msg = str(err).lower()
-        if "source_url" in err_msg or "ix_documents_source_url" in err_msg:
+        if _is_source_url_integrity_error(err):
             raise AppException(
                 status_code=409,
                 code="SOURCE_URL_CONFLICT",
                 message="A document with this source URL already exists",
-                details={"field": "source_url"}
+                fields={"source_url": ["A document with this source URL already exists"]}
             )
         raise
 
@@ -220,24 +233,23 @@ def admin_update_document(db: Session, doc_id: str, data: dict, user: User) -> d
                     status_code=422,
                     code="INVALID_TAG_IDS",
                     message=f"The following tag IDs do not exist: {', '.join(missing_ids)}",
-                    details={"missing_tag_ids": missing_ids}
+                    fields={"tag_ids": [f"Missing tag IDs: {', '.join(missing_ids)}"]}
                 )
 
-    # 2. Check source_url uniqueness if provided
+    # 2. Check source_url uniqueness across all rows if provided (ix_documents_source_url covers all documents)
     if "source_url" in data and data["source_url"]:
         clean_url = data["source_url"].strip() if data["source_url"].strip() else None
         if clean_url:
             existing_doc = db.query(Document).filter(
                 Document.source_url == clean_url,
                 Document.id != doc.id,
-                Document.deleted_at.is_(None)
             ).first()
             if existing_doc:
                 raise AppException(
                     status_code=409,
                     code="SOURCE_URL_CONFLICT",
                     message="A document with this source URL already exists",
-                    details={"field": "source_url"}
+                    fields={"source_url": ["A document with this source URL already exists"]}
                 )
 
     if "title" in data and data["title"] is not None:
@@ -282,26 +294,25 @@ def admin_update_document(db: Session, doc_id: str, data: dict, user: User) -> d
         s_attr = data["source_attribution"]
         doc.source_attribution = s_attr.strip() if (s_attr and s_attr.strip()) else None
 
-    # 3. Only mutate tags if tag_ids was explicitly provided in data
-    if requested_tag_ids is not None:
-        db.query(DocumentTag).filter(DocumentTag.document_id == doc.id).delete(synchronize_session=False)
-        for tid in requested_tag_ids:
-            db.add(DocumentTag(document_id=doc.id, tag_id=tid))
-        db.flush()
-        db.expire(doc, ["document_tags"])
-
-    doc.updated_at = datetime.now(timezone.utc)
     try:
+        # 3. Only mutate tags if tag_ids was explicitly provided in data
+        if requested_tag_ids is not None:
+            db.query(DocumentTag).filter(DocumentTag.document_id == doc.id).delete(synchronize_session=False)
+            for tid in requested_tag_ids:
+                db.add(DocumentTag(document_id=doc.id, tag_id=tid))
+            db.flush()
+            db.expire(doc, ["document_tags"])
+
+        doc.updated_at = datetime.now(timezone.utc)
         db.flush()
     except IntegrityError as err:
         db.rollback()
-        err_msg = str(err).lower()
-        if "source_url" in err_msg or "ix_documents_source_url" in err_msg:
+        if _is_source_url_integrity_error(err):
             raise AppException(
                 status_code=409,
                 code="SOURCE_URL_CONFLICT",
                 message="A document with this source URL already exists",
-                details={"field": "source_url"}
+                fields={"source_url": ["A document with this source URL already exists"]}
             )
         raise
 
@@ -503,14 +514,17 @@ def admin_list_tags(db: Session, q: Optional[str] = None, page: int = 1, page_si
         db.query(Tag, func.count(DocumentTag.document_id).label("doc_count"))
         .outerjoin(DocumentTag, Tag.id == DocumentTag.tag_id)
         .group_by(Tag.id)
-        .order_by(Tag.name.asc())
+        .order_by(Tag.name.asc(), Tag.id.asc())
     )
+    count_query = db.query(func.count(Tag.id))
     if q and q.strip():
-        escaped = q.strip().replace('%', '\\%').replace('_', '\\_')
+        escaped = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         safe_q = f"%{escaped}%"
-        query = query.filter(Tag.name.ilike(safe_q))
+        filter_expr = Tag.name.ilike(safe_q, escape="\\")
+        query = query.filter(filter_expr)
+        count_query = count_query.filter(filter_expr)
 
-    total = db.query(Tag).count()
+    total = count_query.scalar() or 0
     items = query.offset((page - 1) * page_size).limit(page_size).all()
     results = [
         {"id": t.id, "name": t.name, "slug": t.slug, "document_count": count}

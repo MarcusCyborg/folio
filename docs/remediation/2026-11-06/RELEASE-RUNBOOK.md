@@ -1,5 +1,8 @@
 # Folio — Hướng Dẫn Phát Hành & Vận Hành Sản Xuất (Release Runbook)
 
+> [!WARNING]
+> **TÀI LIỆU LỊCH SỬ — ĐÃ ĐƯỢC THAY THẾ TỪ VÒNG 4 (10/11/2026):** Tài liệu Vòng 1 này chứa nhiều tên biến/cờ cũ (`--name` thay vì `--display-name`, `ALLOWED_CORS_ORIGINS` thay vì `CORS_ALLOWED_ORIGINS`, ví dụ `restore.py` vào `folio` và thiếu `--env-file .env.production` / TLS `cert-init`). **Vui lòng sử dụng tài liệu vận hành chính thức hiện hành tại [`docs/remediation/round-4/RELEASE-RUNBOOK.md`](../round-4/RELEASE-RUNBOOK.md).**
+
 Tài liệu này cung cấp quy trình chi tiết từng bước để triển khai bản phát hành đã khắc phục sau audit cho **Folio — Knowledge & Research Library** lên môi trường Production/Staging một cách an toàn và có thể kiểm chứng.
 
 ---

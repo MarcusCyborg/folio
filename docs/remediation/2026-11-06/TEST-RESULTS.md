@@ -1,5 +1,8 @@
 # Folio — Kết Quả Kiểm Thử Toàn Diện (Test Results)
 
+> [!CAUTION]
+> **ĐÍNH CHÍNH (ERRATA — 10/11/2026):** Bảng kết quả vòng 1 dưới đây (tại commit `b659fe5`) có một số đường dẫn/symbol test không khớp thực tế và chưa bao phủ các ca hồi quy thất bại được review độc lập chỉ ra (`R01`–`R18`). Nội dung lịch sử được giữ nguyên để đối chiếu; xem kết quả kiểm thử chính xác và lệnh tái hiện tại **[docs/remediation/round-2/TEST-RESULTS.md](../round-2/TEST-RESULTS.md)**.
+
 - **Thời gian hoàn thành:** 06/11/2026
 - **Commit SHA cơ sở:** `e2cbeb95a9abd47ade38a21d884ae973ea63e1bc`
 - **Branch:** `codex/folio-audit-remediation-20261106`
