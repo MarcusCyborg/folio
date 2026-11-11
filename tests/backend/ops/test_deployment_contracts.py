@@ -45,7 +45,8 @@ from src.backend.models.taxonomy import Category
 from src.backend.search_index.manager import GenerationManager
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-STRONG_TEST_SECRET = "K9#mP$2vL@8xQ!zR5wY&1bN*7tC^4jF(9a1b2c3d4e5f6g7h8i9j0k"
+# Match the runbook's URL-safe secret generation and avoid Compose dollar interpolation.
+STRONG_TEST_SECRET = "FolioTestSecret_K9mP2vL8xQzR5wY1bN7tC4jF_0123456789"
 
 
 def _clean_subprocess_env(extra_env: Dict[str, str]) -> Dict[str, str]:
@@ -384,10 +385,13 @@ class TestR401EnvContract:
                     str(test_env_file),
                     "-f",
                     str(compose_path),
+                    "--profile",
+                    "tools",
                     "config",
                     "--format",
                     "json",
                 ],
+                env=_clean_subprocess_env({}),
                 capture_output=True,
                 text=True,
                 cwd=str(PROJECT_ROOT),
@@ -490,16 +494,28 @@ class TestR401EnvContract:
         docker_bin = shutil.which("docker")
         if docker_bin:
             incomplete_env = tmp_path / ".env.incomplete"
-            incomplete_env.write_text("APP_ENV=production\nAPP_SECRET=\nPOSTGRES_PASSWORD=\n", encoding="utf-8")
-            proc = subprocess.run(
-                [docker_bin, "compose", "--env-file", str(incomplete_env), "-f", str(compose_path), "config"],
-                capture_output=True,
-                text=True,
-                cwd=str(PROJECT_ROOT),
-                timeout=30,
-            )
-            assert proc.returncode != 0
-            assert "APP_SECRET" in (proc.stderr + proc.stdout)
+            # Check each required secret independently; Compose may visit services in any order.
+            for missing_secret in ("APP_SECRET", "POSTGRES_PASSWORD"):
+                values = {
+                    "APP_ENV": "production",
+                    "APP_SECRET": STRONG_TEST_SECRET,
+                    "POSTGRES_PASSWORD": "StrongCustomDbPass2026",
+                }
+                values[missing_secret] = ""
+                incomplete_env.write_text(
+                    "\n".join(f"{key}={_format_dotenv_value(value)}" for key, value in values.items()) + "\n",
+                    encoding="utf-8",
+                )
+                proc = subprocess.run(
+                    [docker_bin, "compose", "--env-file", str(incomplete_env), "-f", str(compose_path), "config"],
+                    env=_clean_subprocess_env({}),
+                    capture_output=True,
+                    text=True,
+                    cwd=str(PROJECT_ROOT),
+                    timeout=30,
+                )
+                assert proc.returncode != 0
+                assert missing_secret in (proc.stderr + proc.stdout)
 
         # 4. Empty or placeholder APP_SECRET in Python production subprocess fails cleanly
         for bad_secret in [
@@ -628,6 +644,7 @@ class TestR401EnvContract:
                     "--format",
                     "json",
                 ],
+                env=_clean_subprocess_env({}),
                 capture_output=True,
                 text=True,
                 cwd=str(PROJECT_ROOT),
