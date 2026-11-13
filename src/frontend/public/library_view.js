@@ -218,7 +218,7 @@ function syncLibraryControlsAndChips(instance, queryParams) {
 
   instance.currentCategoryId = categoryId;
   const isSearchMode = Boolean(q);
-  document.title = isSearchMode ? `Search: "${q}" — Folio` : 'Library Catalog — Folio';
+  document.title = isSearchMode ? `Search: "${q}" — Folio` : 'Folio';
 
   const hasActiveFilters = Boolean(
     q ||
@@ -332,7 +332,7 @@ export async function renderLibrary(container, routeContext) {
   const sort = query.get('sort') || 'newest';
 
   const isSearchMode = Boolean(q);
-  document.title = isSearchMode ? `Search: "${q}" — Folio` : 'Library Catalog — Folio';
+  document.title = isSearchMode ? `Search: "${q}" — Folio` : 'Folio';
 
   const hasActiveFilters = Boolean(
     q ||

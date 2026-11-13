@@ -656,7 +656,7 @@ def test_b2_rapid_navigation_detail_a_detail_b_library(frontend_server, playwrig
     page.wait_for_timeout(350)
 
     assert "#/library" in page.url
-    assert page.title() == "Library Catalog — Folio"
+    assert page.title() == "Folio"
     assert page.locator(".library-layout").count() == 1
     assert page.locator(".detail-page-container").count() == 0
 

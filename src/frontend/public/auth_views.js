@@ -145,7 +145,7 @@ export async function renderLogin(container, routeContext) {
   };
 
   return function routeCleanup() {
-    document.title = 'Folio — Knowledge & Research Library';
+    document.title = 'Folio: Knowledge & Research Library';
   };
 }
 
@@ -349,7 +349,7 @@ export async function renderRegister(container, routeContext) {
   };
 
   return function routeCleanup() {
-    document.title = 'Folio — Knowledge & Research Library';
+    document.title = 'Folio: Knowledge & Research Library';
   };
 }
 
@@ -572,7 +572,7 @@ export async function renderProfile(container, routeContext) {
   };
 
   return function routeCleanup() {
-    document.title = 'Folio — Knowledge & Research Library';
+    document.title = 'Folio: Knowledge & Research Library';
   };
 }
 

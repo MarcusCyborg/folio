@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(
-    title="Folio — Knowledge & Research Library API",
+    title="Folio: Knowledge & Research Library API",
     description="Enterprise Document & Research Repository API",
     version="2.0.0",
     lifespan=lifespan,
