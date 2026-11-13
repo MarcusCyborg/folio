@@ -49,7 +49,7 @@ ROLE_PERMISSIONS_DEFAULTS = {
 }
 
 DEFAULT_SETTINGS = {
-    "site_name": "Folio — Knowledge & Research Library",
+    "site_name": "Folio: Knowledge & Research Library",
     "site_description": "Curated enterprise document store and research library",
     "registration_enabled": True,
     "comments_enabled": True,

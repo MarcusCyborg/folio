@@ -56,7 +56,7 @@ def test_library_catalog_and_viewports(browser_instance):
         page.wait_for_selector(".document-card-row")
 
         # Verify page title
-        assert "Library Catalog" in page.title()
+        assert page.title() == "Folio"
 
         # Capture first viewport evidence
         shot_path = os.path.join(SCREENSHOT_DIR, f"library_{name}.png")
