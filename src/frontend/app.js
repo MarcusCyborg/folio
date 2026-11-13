@@ -107,6 +107,7 @@ export async function loadPublicSettings() {
   try {
     const data = await api('/settings/public');
     if (data) {
+      if (data.site_name) data.site_name = data.site_name.replace('—', ':');
       publicSettings = { ...publicSettings, ...data };
       const brandEl = document.getElementById('shellBrandName');
       const taglineEl = document.getElementById('shellBrandTagline');
