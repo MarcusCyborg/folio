@@ -83,8 +83,8 @@ def test_finding_f2_dirty_guard_all_navigation(live_server, browser_instance):
     assert page.locator("#editTitle").input_value() == unique_text
     assert "#/admin/documents/new" in page.url
 
-    # 2. Attempt navigating via Header Library link
-    header_lib_link = page.locator("#navLibrary")
+    # 2. Attempt navigating via Header Brand / Library link
+    header_lib_link = page.locator(".shell-brand")
     header_lib_link.click()
 
     page.wait_for_selector(".dialog")

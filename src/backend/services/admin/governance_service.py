@@ -248,8 +248,10 @@ def admin_list_audit_logs(
 def admin_get_settings(db: Session) -> dict:
     settings = db.query(AppSetting).all()
     setting_map = {s.key: s.value for s in settings}
+    raw_site_name = setting_map.get("site_name", "Folio: Knowledge & Research Library")
+    site_name = raw_site_name.replace("—", ":") if isinstance(raw_site_name, str) else raw_site_name
     return {
-        "site_name": setting_map.get("site_name", "Folio: Knowledge & Research Library"),
+        "site_name": site_name,
         "site_description": setting_map.get("site_description", "Curated enterprise document store"),
         "registration_enabled": setting_map.get("registration_enabled", True),
         "comments_enabled": setting_map.get("comments_enabled", True),
