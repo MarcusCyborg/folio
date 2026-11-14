@@ -16,39 +16,17 @@ def auth_login(client, email, password="FolioDemo2026!"):
     return res.json()["csrf_token"]
 
 def test_rbac_permission_matrix_enforcement(client):
-    # Member -> 403 on admin
-    csrf_member = auth_login(client, "reader@folio.test")
-    res_m = client.get("/api/v1/admin/documents")
-    assert res_m.status_code == 403
-
-    # Content Manager -> can access documents and taxonomy, 403 on users and moderation
-    csrf_cm = auth_login(client, "content@folio.test")
-    assert client.get("/api/v1/admin/documents").status_code == 200
-    assert client.get("/api/v1/admin/categories").status_code == 200
-    assert client.get("/api/v1/admin/users").status_code == 403
-    assert client.get("/api/v1/admin/comments").status_code == 403
-    assert client.get("/api/v1/admin/analytics/overview").status_code == 403
-
-    # Moderator -> can access moderation comments/reports, 403 on documents
-    csrf_mod = auth_login(client, "moderator@folio.test")
-    assert client.get("/api/v1/admin/comments").status_code == 200
-    assert client.get("/api/v1/admin/reports").status_code == 200
-    assert client.post("/api/v1/admin/documents", headers={"X-CSRF-Token": csrf_mod}, json={"title": "fail"}).status_code == 403
-
-    # Data SEO -> can access SEO and analytics, 403 on document content writes and users
-    csrf_seo = auth_login(client, "seo@folio.test")
-    assert client.get("/api/v1/admin/analytics/overview").status_code == 200
-    assert client.post("/api/v1/admin/documents", headers={"X-CSRF-Token": csrf_seo}, json={"title": "fail"}).status_code == 403
-
-    # Super Admin -> 200 on all
-    csrf_admin = auth_login(client, "admin@folio.test")
-    assert client.get("/api/v1/admin/users").status_code == 200
-    assert client.get("/api/v1/admin/roles").status_code == 200
-    assert client.get("/api/v1/admin/audit-logs").status_code == 200
-    assert client.get("/api/v1/admin/settings").status_code == 200
+    endpoints = (
+        'documents', 'categories', 'tags', 'users', 'roles', 'permissions',
+        'comments', 'reports', 'audit-logs', 'settings', 'analytics/overview',
+    )
+    for email, expected in (('reader@folio.test', 403), ('admin@folio.test', 200)):
+        auth_login(client, email)
+        for endpoint in endpoints:
+            assert client.get(f'/api/v1/admin/{endpoint}').status_code == expected, endpoint
 
 def test_document_full_crud_workflow(client, db_session):
-    csrf = auth_login(client, "content@folio.test")
+    csrf = auth_login(client, "admin@folio.test")
     cat = db_session.query(Category).first()
     tag = db_session.query(Tag).first()
 
@@ -115,7 +93,7 @@ def test_document_full_crud_workflow(client, db_session):
     assert client.get(f"/api/v1/admin/documents/{doc_id}").status_code == 404
 
 def test_taxonomy_crud_and_conflict_protection(client, db_session):
-    csrf = auth_login(client, "content@folio.test")
+    csrf = auth_login(client, "admin@folio.test")
 
     # Create new category
     res_cat = client.post(
@@ -161,25 +139,24 @@ def test_last_super_admin_protection(client, db_session):
     assert deact_res.json()["error"]["code"] == "CANNOT_DEMOTE_LAST_ADMIN"
 
 def test_role_permissions_management(client):
-    csrf = auth_login(client, "admin@folio.test")
-
-    # Cannot modify protected super_admin role permissions -> 400
-    res_prot = client.put(
-        "/api/v1/admin/roles/super_admin/permissions",
-        headers={"X-CSRF-Token": csrf},
-        json={"permissions": ["documents:write"]}
-    )
-    assert res_prot.status_code == 400
-    assert res_prot.json()["error"]["code"] == "PROTECTED_ROLE"
-
-    # Update content_manager permissions
-    res_cm = client.put(
-        "/api/v1/admin/roles/content_manager/permissions",
-        headers={"X-CSRF-Token": csrf},
-        json={"permissions": ["documents:write", "taxonomy:write", "seo:write"]}
-    )
-    assert res_cm.status_code == 200
-    assert "seo:write" in res_cm.json()["permissions"]
+    csrf = auth_login(client, 'admin@folio.test')
+    roles = client.get('/api/v1/admin/roles').json()['items']
+    assert {r['key'] for r in roles} == {'super_admin', 'member'}
+    assert all(r['protected'] for r in roles)
+    for role in ('super_admin', 'member'):
+        response = client.put(
+            f'/api/v1/admin/roles/{role}/permissions',
+            headers={'X-CSRF-Token': csrf},
+            json={'permissions': ['documents:write']},
+        )
+        assert response.status_code == 400
+        assert response.json()['error']['code'] == 'PROTECTED_ROLE'
+    for role in ('content_manager', 'moderator', 'data_seo'):
+        response = client.put(
+            f'/api/v1/admin/roles/{role}/permissions',
+            headers={'X-CSRF-Token': csrf}, json={'permissions': []},
+        )
+        assert response.status_code == 404
 
 def test_moderation_actions_and_suspension(client, db_session):
     # Setup comment and report
@@ -194,7 +171,7 @@ def test_moderation_actions_and_suspension(client, db_session):
     db_session.add(report)
     db_session.commit()
 
-    csrf = auth_login(client, "moderator@folio.test")
+    csrf = auth_login(client, "admin@folio.test")
 
     # 1. Resolve report by marking comment as spam
     res_resolve = client.patch(
@@ -220,7 +197,7 @@ def test_moderation_actions_and_suspension(client, db_session):
 
 def test_seo_and_analytics_dashboard(client, db_session):
     doc = db_session.query(Document).filter(Document.status == "published").first()
-    csrf_seo = auth_login(client, "seo@folio.test")
+    csrf_seo = auth_login(client, "admin@folio.test")
 
     # 1. Update SEO metadata (does not change body or status)
     seo_res = client.patch(

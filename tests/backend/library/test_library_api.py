@@ -152,11 +152,18 @@ def test_like_unlike_idempotency(client, db_session):
     assert res_unlike.json()["likes_count"] == likes_after - 1
 
 def test_comments_crud_and_mentions(client, db_session):
+    from src.backend.core.security import hash_password
+
+    db_session.add(User(
+        email="reviewer@folio.test", username="reviewer", display_name="Second Reader",
+        password_hash=hash_password("FolioDemo2026!"), role_key="member",
+    ))
+    db_session.flush()
     doc = db_session.query(Document).filter(Document.status == "published").first()
     csrf_reader = get_auth_client(client, "reader@folio.test", "FolioDemo2026!")
 
     # 1. Post comment with @mention
-    body = "Great research review @admin and @moderator! Really interesting findings."
+    body = "Great research review @admin and @reviewer! Really interesting findings."
     post_res = client.post(
         f"/api/v1/documents/{doc.id}/comments",
         headers={"X-CSRF-Token": csrf_reader},
@@ -171,7 +178,7 @@ def test_comments_crud_and_mentions(client, db_session):
     assert len(c_data["mentions"]) == 2
     mention_usernames = {m["username"] for m in c_data["mentions"]}
     assert "admin" in mention_usernames
-    assert "moderator" in mention_usernames
+    assert "reviewer" in mention_usernames
 
     # 2. Duplicate comment prevention (anti-spam)
     dup_res = client.post(
@@ -189,7 +196,7 @@ def test_comments_crud_and_mentions(client, db_session):
     assert "email" not in lookup_users[0]  # No email leakage
 
     # 4. Another user cannot edit/delete this comment
-    csrf_mod = get_auth_client(client, "moderator@folio.test", "FolioDemo2026!")
+    csrf_mod = get_auth_client(client, "reviewer@folio.test", "FolioDemo2026!")
     cross_edit = client.patch(
         f"/api/v1/comments/{comment_id}",
         headers={"X-CSRF-Token": csrf_mod},
@@ -214,7 +221,7 @@ def test_comments_crud_and_mentions(client, db_session):
     assert own_edit.json()["body"] == "Updated comment text @admin"
 
     # 6. Report comment
-    csrf_mod = get_auth_client(client, "moderator@folio.test", "FolioDemo2026!")
+    csrf_mod = get_auth_client(client, "reviewer@folio.test", "FolioDemo2026!")
     report_res = client.post(
         f"/api/v1/comments/{comment_id}/reports",
         headers={"X-CSRF-Token": csrf_mod},
@@ -448,7 +455,7 @@ def test_comment_moderation_and_suspension_rules(client, db_session):
     assert res.status_code == 201
     c_id = res.json()["id"]
 
-    # 2. Moderator hides comment
+    # 2. Super Admin hides comment
     comment_row = db_session.query(Comment).filter(Comment.id == c_id).first()
     comment_row.status = "hidden"
     db_session.commit()
@@ -462,7 +469,7 @@ def test_comment_moderation_and_suspension_rules(client, db_session):
     assert edit_res.status_code == 403
     assert edit_res.json()["error"]["code"] == "CANNOT_EDIT_MODERATED_COMMENT"
 
-    # 4. Moderator marks comment as spam
+    # 4. Super Admin marks comment as spam
     comment_row.status = "spam"
     db_session.commit()
 

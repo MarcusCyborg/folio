@@ -13,7 +13,7 @@ def auth_login(client, email, password="FolioDemo2026!"):
     return res.json()["csrf_token"]
 
 def test_document_full_lifecycle_and_validation(client, db_session):
-    csrf = auth_login(client, "content@folio.test")
+    csrf = auth_login(client, "admin@folio.test")
     cat = db_session.query(Category).first()
     tag = db_session.query(Tag).first()
 
@@ -72,7 +72,7 @@ def test_document_full_lifecycle_and_validation(client, db_session):
     doc_id = doc_data["id"]
     assert doc_data["status"] == "draft"
     assert doc_data["published_at"] is None
-    assert doc_data["author"] == "Content Manager"  # default display_name
+    assert doc_data["author"] == "Super Admin"  # default display_name
 
     # Draft document MUST NOT be visible in public library
     assert client.get(f"/api/v1/documents/{doc_id}").status_code == 404
@@ -177,7 +177,7 @@ def test_r12_patch_source_url_conflict_with_tags_and_soft_deleted_returns_409_at
     with zero partial tag or field mutation.
     """
     import uuid
-    csrf = auth_login(client, "content@folio.test")
+    csrf = auth_login(client, "admin@folio.test")
     cat = db_session.query(Category).first()
     tags = db_session.query(Tag).limit(2).all()
     assert len(tags) >= 2

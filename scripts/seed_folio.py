@@ -12,6 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.backend.core.config import settings
+from src.backend.core.roles import ROLES_CATALOG, PERMISSIONS_CATALOG, ROLE_PERMISSIONS_DEFAULTS
 from src.backend.core.wiki_content import clean_wikipedia_content
 from src.backend.core.database import SessionLocal, engine as default_engine
 from src.backend.core.security import hash_password
@@ -20,33 +21,6 @@ from src.backend.models.taxonomy import Category, Tag
 from src.backend.models.document import Document, DocumentTag
 from src.backend.models.system import AppSetting, AuditLog
 from src.backend.search_index.outbox import record_revision_and_outbox_job
-
-ROLES_CATALOG = [
-    ("member", "Library Member"),
-    ("content_manager", "Content Manager"),
-    ("moderator", "Moderator"),
-    ("data_seo", "Data & SEO Specialist"),
-    ("super_admin", "Super Admin"),
-]
-
-PERMISSIONS_CATALOG = [
-    ("documents:write", "Create, edit, publish and soft-delete library documents"),
-    ("taxonomy:write", "Create, update and delete categories and tags"),
-    ("moderation:manage", "Review and moderate comments, handle flags and suspend commenting"),
-    ("seo:write", "Update document SEO metadata, keywords and image alt text"),
-    ("analytics:read", "Access analytics dashboards, search logs and document views"),
-    ("users:manage", "Manage user accounts, assign roles and deactivate users"),
-    ("roles:manage", "Configure role permissions matrix"),
-    ("audit:read", "View system and security audit logs"),
-    ("settings:write", "Configure site settings and toggles"),
-]
-
-ROLE_PERMISSIONS_DEFAULTS = {
-    "content_manager": ["documents:write", "taxonomy:write"],
-    "moderator": ["moderation:manage"],
-    "data_seo": ["seo:write", "analytics:read"],
-    "super_admin": [p[0] for p in PERMISSIONS_CATALOG],
-}
 
 DEFAULT_SETTINGS = {
     "site_name": "Folio: Knowledge & Research Library",
@@ -57,9 +31,6 @@ DEFAULT_SETTINGS = {
 
 DEMO_USERS = [
     ("admin@folio.test", "admin", "Super Admin", "super_admin", "System administrator and platform maintainer"),
-    ("content@folio.test", "content_mgr", "Content Manager", "content_manager", "Lead editor and research taxonomist"),
-    ("moderator@folio.test", "moderator", "Community Moderator", "moderator", "Forum curator and discussions moderator"),
-    ("seo@folio.test", "seo_specialist", "Data & SEO Specialist", "data_seo", "Analytics coordinator and SEO strategist"),
     ("reader@folio.test", "reader", "Active Reader", "member", "Research scholar and library contributor"),
 ]
 

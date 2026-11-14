@@ -2,7 +2,7 @@
 // Governance: User Directory, RBAC Permissions Matrix, Audit Trail, Global Settings
 
 import { api, ApiError } from '../core/api.js';
-import { can, refreshSession } from '../core/session.js';
+import { can } from '../core/session.js';
 import { notify, confirmAction, renderPagination, renderError } from '../core/ui.js';
 import { wrapAdminLayout } from './admin_shell.js';
 import { loadPublicSettings } from '../app.js';
@@ -35,9 +35,6 @@ export async function renderUsersManager(container, routeContext) {
         <select id="userRoleFilter" class="select" style="flex: 1; min-width: 160px;">
           <option value="" ${!roleFilter ? 'selected' : ''}>All Roles</option>
           <option value="super_admin" ${roleFilter === 'super_admin' ? 'selected' : ''}>Super Admin</option>
-          <option value="content_manager" ${roleFilter === 'content_manager' ? 'selected' : ''}>Content Manager</option>
-          <option value="moderator" ${roleFilter === 'moderator' ? 'selected' : ''}>Moderator</option>
-          <option value="data_seo" ${roleFilter === 'data_seo' ? 'selected' : ''}>Data & SEO</option>
           <option value="member" ${roleFilter === 'member' ? 'selected' : ''}>Member</option>
         </select>
         <button class="btn btn-secondary" id="userFilterBtn">Filter</button>
@@ -109,9 +106,6 @@ function renderUsersTable(tableArea, paginationArea, data, onPageChange, contain
 
   const roleOptions = [
     { key: 'super_admin', label: 'Super Admin' },
-    { key: 'content_manager', label: 'Content Manager' },
-    { key: 'moderator', label: 'Moderator' },
-    { key: 'data_seo', label: 'Data & SEO' },
     { key: 'member', label: 'Member' },
   ];
 
@@ -259,7 +253,7 @@ export async function renderRolesMatrix(container, routeContext) {
     <div class="admin-toolbar">
       <div>
         <p style="margin: 0; color: var(--color-muted); font-size: 0.9rem;">
-          Configure granular capability permissions for each role. Note: <strong>super_admin</strong> permissions are protected.
+          <strong>Super Admin</strong> manages all library and administration features. <strong>Member</strong> can read, like, comment, and report content. These permissions are fixed.
         </p>
       </div>
       <a href="#/admin/users" class="btn btn-secondary">&larr; User Directory</a>
@@ -280,15 +274,16 @@ export async function renderRolesMatrix(container, routeContext) {
       api('/admin/permissions', { signal }),
     ]);
 
-    renderMatrixTable(matrixArea, rolesData.items, permsData.items, container);
+    renderMatrixTable(matrixArea, rolesData.items, permsData.items);
   } catch (err) {
     if (signal?.aborted) return;
     renderError(matrixArea, err, { onRetry: () => renderRolesMatrix(container, routeContext) });
   }
 }
 
-function renderMatrixTable(matrixArea, roles, permissions, container) {
-  const roleOrder = ['super_admin', 'content_manager', 'moderator', 'data_seo', 'member'];
+function renderMatrixTable(matrixArea, roles, permissions) {
+  const roleOrder = ['super_admin', 'member'];
+  roles = roles.filter((role) => roleOrder.includes(role.key));
   roles.sort((a, b) => {
     const idxA = roleOrder.indexOf(a.key);
     const idxB = roleOrder.indexOf(b.key);
@@ -299,7 +294,7 @@ function renderMatrixTable(matrixArea, roles, permissions, container) {
     <th style="text-align: center; min-width: 140px;">
       <div>${escapeText(r.label || r.key)}</div>
       <div style="font-size: 0.75rem; font-weight: normal; color: var(--color-muted); margin-top: 0.15rem;">
-        ${r.protected || r.key === 'super_admin' ? '<span class="badge badge-sm badge-info">Protected</span>' : `<code>${escapeText(r.key)}</code>`}
+        <span class="badge badge-sm badge-info">Fixed</span>
       </div>
     </th>
   `).join('');
@@ -307,7 +302,6 @@ function renderMatrixTable(matrixArea, roles, permissions, container) {
   const rowsHtml = permissions.map((p) => {
     const cellsHtml = roles.map((r) => {
       const hasPerm = r.permissions && r.permissions.includes(p.key);
-      const isProtected = r.protected || r.key === 'super_admin';
 
       return `
         <td style="text-align: center;">
@@ -317,7 +311,7 @@ function renderMatrixTable(matrixArea, roles, permissions, container) {
             data-role-key="${r.key}" 
             data-perm-key="${p.key}"
             ${hasPerm ? 'checked' : ''}
-            ${isProtected ? 'disabled title="Protected Super Admin permission"' : ''}
+            disabled title="Fixed role permission"
           />
         </td>
       `;
@@ -334,17 +328,6 @@ function renderMatrixTable(matrixArea, roles, permissions, container) {
     `;
   }).join('');
 
-  const actionFootersHtml = roles.map((r) => {
-    if (r.protected || r.key === 'super_admin') {
-      return '<td style="text-align: center;"><span class="text-muted" style="font-size: 0.8rem; color: var(--color-muted);">Protected</span></td>';
-    }
-    return `
-      <td style="text-align: center;">
-        <button class="btn btn-sm btn-primary btn-save-role-perms" data-role-key="${r.key}">Save ${escapeText(r.label || r.key)}</button>
-      </td>
-    `;
-  }).join('');
-
   matrixArea.innerHTML = `
     <table class="table matrix-table">
       <thead>
@@ -356,40 +339,8 @@ function renderMatrixTable(matrixArea, roles, permissions, container) {
       <tbody>
         ${rowsHtml}
       </tbody>
-      <tfoot>
-        <tr style="background: var(--color-bg);">
-          <td style="font-weight: 600;">Save Action</td>
-          ${actionFootersHtml}
-        </tr>
-      </tfoot>
     </table>
   `;
-
-  // Bind Save Buttons per role
-  matrixArea.querySelectorAll('.btn-save-role-perms').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      const roleKey = e.target.dataset.roleKey;
-      const checkedBoxes = matrixArea.querySelectorAll(`.matrix-perm-check[data-role-key="${roleKey}"]:checked`);
-      const selectedPerms = Array.from(checkedBoxes).map((chk) => chk.dataset.permKey);
-
-      try {
-        btn.disabled = true;
-        btn.textContent = 'Saving...';
-        await api(`/admin/roles/${roleKey}/permissions`, {
-          method: 'PUT',
-          body: { permissions: selectedPerms }
-        });
-        notify(`Permissions saved for ${roleKey}.`, { kind: 'success' });
-        // Refresh session context in case current user's active permissions changed
-        await refreshSession();
-      } catch (err) {
-        notify(err.message || `Failed to update permissions for ${roleKey}`, { kind: 'error' });
-      } finally {
-        btn.disabled = false;
-        btn.textContent = `Save ${roleKey}`;
-      }
-    });
-  });
 }
 
 // ==============================================================================

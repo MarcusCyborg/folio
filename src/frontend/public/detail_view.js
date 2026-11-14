@@ -641,7 +641,7 @@ export async function renderDocumentDetail(container, routeContext) {
               <div class="comment-actions">
                 ${c.can_edit && !isUserSuspended ? `<button class="btn btn-secondary btn-sm edit-comment-btn">Edit</button>` : ''}
                 ${c.can_delete ? `<button class="btn btn-secondary btn-sm delete-comment-btn">Delete</button>` : ''}
-                ${!isOwner ? `<button class="btn btn-secondary btn-sm report-comment-btn" title="Report this note to moderators">Report</button>` : ''}
+                ${!isOwner ? `<button class="btn btn-secondary btn-sm report-comment-btn" title="Report this note to administrators">Report</button>` : ''}
               </div>
             </div>
             <div class="comment-body-container">
@@ -855,7 +855,7 @@ function openReportDialog(containerEl, commentId) {
       <div class="dialog-modal report-dialog" role="dialog" aria-labelledby="reportModalTitle" aria-modal="true">
         <h3 id="reportModalTitle" class="dialog-title">Report Research Note</h3>
         <p style="color: var(--color-muted); font-size: 0.875rem; margin-bottom: 1rem;">
-          Notify library moderators about notes containing harassment, spam, copyright infringement, or invalid research citations.
+          Notify library administrators about notes containing harassment, spam, copyright infringement, or invalid research citations.
         </p>
         <form id="reportCommentForm">
           <div class="field">
@@ -870,7 +870,7 @@ function openReportDialog(containerEl, commentId) {
 
           <div class="field">
             <label class="label" for="reportDetailsInput">Additional Details (optional)</label>
-            <textarea id="reportDetailsInput" class="textarea" rows="3" placeholder="Explain the issue for moderators..."></textarea>
+            <textarea id="reportDetailsInput" class="textarea" rows="3" placeholder="Explain the issue for administrators..."></textarea>
           </div>
 
           <div id="reportErrorBox" class="notice notice-error" style="display: none; margin-bottom: 1rem;"></div>
@@ -916,7 +916,7 @@ function openReportDialog(containerEl, commentId) {
         },
       });
       closeModal();
-      notify('Report submitted for moderator review.', { kind: 'success' });
+      notify('Report submitted for administrator review.', { kind: 'success' });
     } catch (err) {
       if (err.status === 409) {
         errorBox.textContent = 'You have already submitted an open report for this note.';

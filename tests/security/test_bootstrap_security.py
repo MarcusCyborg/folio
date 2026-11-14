@@ -74,7 +74,6 @@ def mem_db():
         # Pre-seed role taxonomy
         session.add(Role(key="super_admin", label="Super Administrator"))
         session.add(Role(key="member", label="Member"))
-        session.add(Role(key="editor", label="Editor"))
         session.commit()
         yield session
     engine.dispose()

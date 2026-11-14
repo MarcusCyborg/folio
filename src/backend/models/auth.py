@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint, Index
+from sqlalchemy import String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint, Index, CheckConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.backend.models.base import Base, utcnow
 
@@ -10,6 +10,9 @@ def gen_uuid() -> str:
 
 class Role(Base):
     __tablename__ = "roles"
+    __table_args__ = (
+        CheckConstraint("key IN ('super_admin', 'member')", name="ck_roles_supported_key"),
+    )
 
     key: Mapped[str] = mapped_column(String(50), primary_key=True)
     label: Mapped[str] = mapped_column(String(100), nullable=False)

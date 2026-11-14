@@ -13,7 +13,7 @@ def auth_login(client, email, password="FolioDemo2026!"):
     return res.json()["csrf_token"]
 
 def test_category_crud_slug_uniqueness_and_conflict(client, db_session):
-    csrf = auth_login(client, "content@folio.test")
+    csrf = auth_login(client, "admin@folio.test")
 
     # 1. Create category with custom slug
     res1 = client.post(
@@ -76,7 +76,7 @@ def test_category_crud_slug_uniqueness_and_conflict(client, db_session):
     assert del_used.json()["error"]["code"] == "CATEGORY_IN_USE"
 
 def test_tag_crud_slug_uniqueness_and_conflict(client, db_session):
-    csrf = auth_login(client, "content@folio.test")
+    csrf = auth_login(client, "admin@folio.test")
 
     # 1. Create tag
     res_tag = client.post(
@@ -128,7 +128,7 @@ def test_tag_crud_slug_uniqueness_and_conflict(client, db_session):
 
 def test_b07_admin_tags_filtered_total_and_pagination_beyond_100(client, db_session):
     """R07 / B07: GET /api/v1/admin/tags?q= returns exact filtered total and paginates >100 tags."""
-    csrf = auth_login(client, "content@folio.test")
+    csrf = auth_login(client, "admin@folio.test")
     tags = [
         Tag(name=f"BatchTag Alpha {i:03d}", slug=f"batchtag-alpha-{i:03d}")
         for i in range(105)

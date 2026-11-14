@@ -4,12 +4,13 @@ from typing import Optional, List, Tuple, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 
-from src.backend.models.auth import User, Role, Permission, RolePermission
+from src.backend.models.auth import User, Role, Permission
 from src.backend.models.system import AuditLog, AppSetting
 from src.backend.core.audit import write_audit, redact_payload
 from src.backend.core.dependencies import get_effective_permissions
 from src.backend.core.exceptions import AppException
 from src.backend.core.session import revoke_user_sessions
+from src.backend.core.roles import SUPPORTED_ROLES
 from src.backend.schemas.auth import UserSelf
 
 def admin_list_users(
@@ -90,6 +91,8 @@ def admin_update_user(
     before_state = {"role_key": target_user.role_key, "is_active": target_user.is_active}
 
     if role_key is not None:
+        if role_key not in SUPPORTED_ROLES:
+            raise AppException(status_code=422, code="INVALID_ROLE", message="Choose Super Admin or Member")
         role = db.query(Role).filter(Role.key == role_key).first()
         if not role:
             raise AppException(status_code=422, code="INVALID_ROLE", message=f"Role '{role_key}' does not exist")
@@ -129,7 +132,7 @@ def admin_update_user(
     )
 
 def admin_list_roles(db: Session) -> List[dict]:
-    roles = db.query(Role).order_by(Role.key.asc()).all()
+    roles = db.query(Role).filter(Role.key.in_(SUPPORTED_ROLES)).order_by(Role.key.asc()).all()
     results = []
     for r in roles:
         perms = sorted(list(get_effective_permissions(db, r.key)))
@@ -137,7 +140,7 @@ def admin_list_roles(db: Session) -> List[dict]:
             "key": r.key,
             "label": r.label,
             "permissions": perms,
-            "protected": (r.key == "super_admin"),
+            "protected": True,
         })
     return results
 
@@ -151,51 +154,15 @@ def admin_update_role_permissions(
     permissions_list: List[str],
     actor: User,
 ) -> dict:
-    role = db.query(Role).filter(Role.key == role_key).first()
+    role = db.query(Role).filter(Role.key == role_key, Role.key.in_(SUPPORTED_ROLES)).first()
     if not role:
         raise AppException(status_code=404, code="ROLE_NOT_FOUND", message="Role not found")
 
-    if role.key == "super_admin":
-        raise AppException(
-            status_code=400,
-            code="PROTECTED_ROLE",
-            message="Super Admin permissions are system-protected and cannot be modified."
-        )
-
-    # Validate catalog
-    all_perm_keys = {p[0] for p in db.query(Permission.key).all()}
-    invalid = [p for p in permissions_list if p not in all_perm_keys]
-    if invalid:
-        raise AppException(
-            status_code=422,
-            code="INVALID_PERMISSIONS",
-            message=f"The following permission keys do not exist: {', '.join(invalid)}"
-        )
-
-    before_perms = sorted([rp.permission_key for rp in role.role_permissions])
-
-    # Re-assign permissions
-    db.query(RolePermission).filter(RolePermission.role_key == role.key).delete()
-    for pk in set(permissions_list):
-        db.add(RolePermission(role_key=role.key, permission_key=pk))
-
-    write_audit(
-        db,
-        actor=actor,
-        action="role.permissions_update",
-        entity_type="role",
-        entity_id=role.key,
-        before={"permissions": before_perms},
-        after={"permissions": sorted(permissions_list)}
+    raise AppException(
+        status_code=400,
+        code="PROTECTED_ROLE",
+        message="Role permissions are fixed: Super Admin has all administrative permissions; Member has none."
     )
-    db.commit()
-
-    return {
-        "key": role.key,
-        "label": role.label,
-        "permissions": sorted(permissions_list),
-        "protected": False,
-    }
 
 def admin_list_audit_logs(
     db: Session,

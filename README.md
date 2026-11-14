@@ -14,10 +14,9 @@ Folio is an enterprise document and research repository built to fulfill the **P
   - Multi-faceted research filtering: ILIKE keyword search, academic categories, multi-tag filtering (`AND` logic), and date ranges.
   - Reader engagement: Argon2id authentication, session management, CSRF defense, liking, threaded comments with Markdown, `@mentions` autocomplete, and content report flagging.
 - **Role-Based Access Control (RBAC):**
-  - **Super Administrator:** Manage users, assign roles, configure dynamic role capability matrix in database, inspect immutable system audit trail with JSON state diffs, and configure global settings.
-  - **Content Manager:** Full document authoring with Markdown editor and live preview, draft/publish workflow, and category/tag taxonomy management with foreign-key conflict protection.
-  - **Moderator:** Review comments queue (visible, hidden, spam), resolve flagged reports, and apply temporary commenting suspensions with audit reasons.
-  - **Data & SEO Specialist:** Configure document SEO metadata (meta titles, descriptions, keywords, alt text) with Google SERP simulator, and monitor library analytics dashboards with zero-filled daily series.
+  - **Super Admin:** All document authoring, publication, taxonomy, moderation, SEO, analytics, user management, audit, and global settings capabilities.
+  - **Member:** Public reading, likes, threaded comments, `@mentions`, and content reporting. Members cannot access administration.
+  - The two role permission sets are fixed. The role matrix is read-only, and the last active Super Admin remains protected from demotion or deactivation.
 - **Phase 2 Search Engine Preparation:**
   - Complete Document Store (`id`, `title`, `content`, `summary`, `category_id`, `tags`, `author`, `created_at`, `views_count`).
   - Standardized interaction logging table (`interaction_logs`) recording discrete search events (capturing `query_string`, `search_event_id`, and `result_doc_ids`) and result click events (validating result membership and parent search event linkage).
@@ -99,7 +98,7 @@ Populate the database with the curated research fixture (fully idempotent):
 ```powershell
 python scripts/seed_folio.py
 ```
-*Output confirms: `Seed complete. Database now contains: 5 users, 100 published documents, 3 drafts, 6 categories, 123 tags.`*
+*Output confirms: `Seed complete. Database now contains: 2 users, 100 published documents, 3 drafts, 6 categories, 123 tags.`*
 Running `python scripts/seed_folio.py` multiple times is safe and produces identical state without duplicates.
 
 ### Step 5: Launch Development Server
@@ -194,11 +193,23 @@ All demo accounts are pre-seeded with the uniform password: `FolioDemo2026!`
 
 | Role | Email | Username | Key Capabilities |
 | :--- | :--- | :--- | :--- |
-| **Super Admin** | `admin@folio.test` | `admin` | Users, dynamic role permission matrix, audit diffs, settings |
-| **Content Manager** | `content@folio.test` | `content_mgr` | Document CRUD, Markdown editor with live preview, taxonomy |
-| **Moderator** | `moderator@folio.test` | `moderator` | Comments queue, resolve reports, user commenting suspension |
-| **Data & SEO Specialist** | `seo@folio.test` | `seo_specialist` | SEO metadata, Google SERP simulator, analytics overview |
+| **Super Admin** | `admin@folio.test` | `admin` | All administration, content, moderation, SEO, and analytics |
 | **Reader / Member** | `reader@folio.test` | `reader` | Public reading, liking, commenting with `@mentions`, reporting |
+
+### Upgrading an Existing Database
+
+Run `alembic upgrade head` before starting the updated application. Migration
+`20261114_consolidate_roles` retains existing Super Admins, converts accounts in
+retired staff roles to Member, removes retired role definitions and non-admin
+capability grants, and records the previous assignments in the audit trail.
+Account IDs, passwords, documents, comments, and authorship remain intact. Fresh
+seeds create only the admin and reader demo accounts. Re-seeding does not delete
+existing accounts or recreate retired roles.
+
+The Permissions Matrix now displays fixed Super Admin and Member permissions;
+use Users & Staff to explicitly promote or demote accounts. Migration downgrade
+restores saved role definitions, grants, and former staff assignments for accounts
+that are still Members, while preserving subsequent Super Admin promotions.
 
 ---
 

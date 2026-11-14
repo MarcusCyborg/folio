@@ -4,24 +4,24 @@ from datetime import datetime, timedelta, timezone
 def test_end_to_end_research_library_lifecycle(client):
     """
     Comprehensive End-to-End integration test covering the complete Folio lifecycle:
-    1. Content Manager creates category, creates draft, verifies invisibility, then publishes.
+    1. Super Admin creates category, creates draft, verifies invisibility, then publishes.
     2. Reader searches for document, receives search_event_id, logs click and view event.
     3. Reader likes document, posts a comment with mention.
     4. Member reports comment.
-    5. Moderator resolves report (hides comment) and temporarily suspends commenting for reader.
+    5. Super Admin resolves report (hides comment) and temporarily suspends commenting for reader.
     6. Reader is blocked from commenting while suspended.
-    7. SEO Specialist sets custom SEO metadata and inspects analytics dashboard.
+    7. Super Admin sets custom SEO metadata and inspects analytics dashboard.
     8. Super Admin checks audit trail and updates global settings.
     """
     # -------------------------------------------------------------------------
-    # 1. Content Manager creates category, creates document, publishes
+    # 1. Super Admin creates category, creates document, publishes
     # -------------------------------------------------------------------------
     session_res = client.get("/api/v1/auth/session")
     csrf_token = session_res.json()["csrf_token"]
 
     login_res = client.post(
         "/api/v1/auth/login",
-        json={"email": "content@folio.test", "password": "FolioDemo2026!"},
+        json={"email": "admin@folio.test", "password": "FolioDemo2026!"},
         headers={"X-CSRF-Token": csrf_token},
     )
     assert login_res.status_code == 200
@@ -119,16 +119,16 @@ def test_end_to_end_research_library_lifecycle(client):
     assert like_res.status_code == 200
     assert like_res.json()["liked_by_me"] is True
 
-    # Post comment with mention @content_mgr
+    # Post comment with mention @admin
     comment_res = client.post(
         f"/api/v1/documents/{doc_id}/comments",
-        json={"body": "Fascinating quantum results, cc @content_mgr for review!"},
+        json={"body": "Fascinating quantum results, cc @admin for review!"},
         headers={"X-CSRF-Token": csrf_token},
     )
     assert comment_res.status_code == 201
     comment_data = comment_res.json()
     comment_id = comment_data["id"]
-    assert any(m["username"] == "content_mgr" for m in comment_data["mentions"])
+    assert any(m["username"] == "admin" for m in comment_data["mentions"])
 
     # -------------------------------------------------------------------------
     # 3. Member reports the comment
@@ -142,11 +142,11 @@ def test_end_to_end_research_library_lifecycle(client):
     report_id = report_res.json()["id"]
 
     # -------------------------------------------------------------------------
-    # 4. Moderator reviews report, hides comment, and suspends user commenting
+    # 4. Super Admin reviews report, hides comment, and suspends user commenting
     # -------------------------------------------------------------------------
     login_mod = client.post(
         "/api/v1/auth/login",
-        json={"email": "moderator@folio.test", "password": "FolioDemo2026!"},
+        json={"email": "admin@folio.test", "password": "FolioDemo2026!"},
         headers={"X-CSRF-Token": csrf_token},
     )
     assert login_mod.status_code == 200
@@ -189,11 +189,11 @@ def test_end_to_end_research_library_lifecycle(client):
     assert "suspended" in blocked_comment.text.lower()
 
     # -------------------------------------------------------------------------
-    # 6. SEO Specialist edits SEO metadata and checks analytics
+    # 6. Super Admin edits SEO metadata and checks analytics
     # -------------------------------------------------------------------------
     login_seo = client.post(
         "/api/v1/auth/login",
-        json={"email": "seo@folio.test", "password": "FolioDemo2026!"},
+        json={"email": "admin@folio.test", "password": "FolioDemo2026!"},
         headers={"X-CSRF-Token": csrf_token},
     )
     assert login_seo.status_code == 200

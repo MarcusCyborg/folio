@@ -45,57 +45,31 @@ def test_admin_entry_and_rbac_guards(live_server, browser_instance):
 
     context.close()
 
-def test_content_manager_permissions(live_server, browser_instance):
-    context = browser_instance.new_context(viewport={"width": 1440, "height": 900})
+def test_super_admin_navigation(live_server, browser_instance):
+    context = browser_instance.new_context(viewport={'width': 1440, 'height': 900})
     page = context.new_page()
-
-    # Log in as Content Manager
-    login_user(page, "content@folio.test")
-
-    # Navigate to #/admin -> redirects to first allowed screen (/admin/documents)
-    page.goto(f"{BASE_URL}/#/admin")
-    page.wait_for_selector(".admin-sidebar")
-    assert "#/admin/documents" in page.url
-
-    # Check visible sidebar links
-    sidebar_text = page.locator(".admin-sidebar-nav").inner_text()
-    assert "Documents" in sidebar_text
-    assert "Taxonomy" in sidebar_text
-    assert "Users & Staff" not in sidebar_text
-    assert "Audit Trail" not in sidebar_text
-
-    # Unauthorized deep link to #/admin/users shows 403
-    page.goto(f"{BASE_URL}/#/admin/users")
-    page.wait_for_selector(".notice-error")
-    assert "403 Forbidden" in page.content()
-
+    login_user(page, 'admin@folio.test')
+    page.goto(f'{BASE_URL}/#/admin')
+    page.wait_for_selector('.admin-sidebar')
+    assert '#/admin/documents' in page.url
+    sidebar_text = page.locator('.admin-sidebar-nav-container').inner_text()
+    for label in ('Documents', 'Taxonomy', 'Users & Staff', 'Audit Trail', 'SEO', 'Analytics'):
+        assert label in sidebar_text
+    page.goto(f'{BASE_URL}/#/admin/users')
+    page.wait_for_selector('.user-role-select')
+    options = page.locator('.user-role-select').first.locator('option').evaluate_all('(items) => items.map(item => item.value)')
+    assert options == ['super_admin', 'member']
     context.close()
 
-def test_data_seo_specialist_permissions(live_server, browser_instance):
-    context = browser_instance.new_context(viewport={"width": 1440, "height": 900})
+def test_member_cannot_access_administrative_features(live_server, browser_instance):
+    context = browser_instance.new_context(viewport={'width': 1440, 'height': 900})
     page = context.new_page()
-
-    # Log in as Data & SEO specialist
-    login_user(page, "seo@folio.test")
-
-    # Navigate to #/admin -> redirects to #/admin/seo
-    page.goto(f"{BASE_URL}/#/admin")
-    page.wait_for_selector(".admin-sidebar")
-    assert "#/admin/seo" in page.url
-
-    # Can view documents list, but cannot create or edit body
-    page.goto(f"{BASE_URL}/#/admin/documents")
-    page.wait_for_selector("table")
-    # Verify no create button
-    assert page.locator("#createNewDocBtn").count() == 0
-    # Table should show "Edit SEO" button instead of write editor
-    assert page.locator("text=Configure SEO").count() > 0 or page.locator("a[href*='/admin/seo']").count() > 0
-
-    # Deep link to create document shows 403
-    page.goto(f"{BASE_URL}/#/admin/documents/new")
-    page.wait_for_selector(".notice-error")
-    assert "403 Forbidden" in page.content()
-
+    login_user(page, 'reader@folio.test')
+    assert not page.locator('#navAdmin').is_visible()
+    for route in ('documents/new', 'taxonomy', 'comments', 'reports', 'seo', 'analytics', 'users', 'roles', 'audit', 'settings'):
+        page.goto(f'{BASE_URL}/#/admin/{route}')
+        page.wait_for_selector('.notice-error')
+        assert '403 Forbidden' in page.content()
     context.close()
 
 def test_super_admin_full_documents_crud_and_dirty_guard(live_server, browser_instance):
@@ -280,7 +254,7 @@ def test_seo_management_and_preview_simulation(live_server, browser_instance):
     context = browser_instance.new_context(viewport={"width": 1440, "height": 900})
     page = context.new_page()
 
-    login_user(page, "seo@folio.test")
+    login_user(page, "admin@folio.test")
     page.goto(f"{BASE_URL}/#/admin/seo")
     page.wait_for_selector("table")
 
@@ -373,11 +347,12 @@ def test_roles_matrix_and_settings(live_server, browser_instance):
     super_admin_checks = page.locator(".matrix-perm-check[data-role-key='super_admin']")
     assert super_admin_checks.first.is_disabled()
 
-    # Save a non-protected role
-    save_cm_btn = page.locator(".btn-save-role-perms[data-role-key='content_manager']")
-    if save_cm_btn.count() > 0:
-      save_cm_btn.click()
-      page.wait_for_selector("text=Permissions saved for content_manager")
+    member_checks = page.locator(".matrix-perm-check[data-role-key='member']")
+    assert member_checks.count() == super_admin_checks.count()
+    assert member_checks.first.is_disabled()
+    assert page.locator(".matrix-perm-check[data-role-key='member']:checked").count() == 0
+    assert page.locator('.btn-save-role-perms').count() == 0
+    assert page.locator('.matrix-table thead th').count() == 3
 
     # 2. Audit Trail
     page.goto(f"{BASE_URL}/#/admin/audit")

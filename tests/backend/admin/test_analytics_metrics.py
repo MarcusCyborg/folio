@@ -15,7 +15,7 @@ def auth_login(client, email, password="FolioDemo2026!"):
     return res.json()["csrf_token"]
 
 def test_analytics_exact_calculations_and_zero_fill(client, db_session):
-    csrf_seo = auth_login(client, "seo@folio.test")
+    csrf_seo = auth_login(client, "admin@folio.test")
 
     # Define test dates in UTC
     target_date1 = date(2026, 10, 10)
@@ -143,7 +143,7 @@ def test_analytics_exact_calculations_and_zero_fill(client, db_session):
     assert doc2.id in top_doc_ids
 
 def test_analytics_edge_cases_and_error_handling(client):
-    auth_login(client, "seo@folio.test")
+    auth_login(client, "admin@folio.test")
 
     # 1. Inverted date range (date_from > date_to) -> 422
     res_inv = client.get("/api/v1/admin/analytics/overview?date_from=2026-10-20&date_to=2026-10-10")

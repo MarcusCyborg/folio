@@ -20,7 +20,7 @@ def test_seo_metadata_persistence_and_isolation(client, db_session):
     original_content = doc.content
     original_status = doc.status
 
-    csrf_seo = auth_login(client, "seo@folio.test")
+    csrf_seo = auth_login(client, "admin@folio.test")
 
     # 1. Update SEO metadata
     seo_res = client.patch(

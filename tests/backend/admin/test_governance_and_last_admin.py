@@ -38,16 +38,16 @@ def test_user_management_and_immediate_effect(db_session):
         reader = db_session.query(User).filter(User.username == "reader").first()
         cat = db_session.query(Category).first()
 
-        # 1. Promote reader to content_manager
+        # 1. Promote reader to super_admin
         patch_role = admin_client.patch(
             f"/api/v1/admin/users/{reader.id}",
             headers={"X-CSRF-Token": csrf_admin},
-            json={"role_key": "content_manager"}
+            json={"role_key": "super_admin"}
         )
         assert patch_role.status_code == 200
-        assert patch_role.json()["role_key"] == "content_manager"
+        assert patch_role.json()["role_key"] == "super_admin"
 
-        # Next request by reader -> reader now has content_manager permissions!
+        # Next request by reader -> reader now has super_admin permissions!
         create_test = reader_client.post(
             "/api/v1/admin/documents",
             headers={"X-CSRF-Token": csrf_reader},
@@ -89,63 +89,23 @@ def test_user_management_and_immediate_effect(db_session):
 
 def test_permission_revocation_takes_immediate_effect(db_session):
     def override_get_db():
-        try:
-            yield db_session
-        finally:
-            pass
+        yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
     try:
-        admin_client = TestClient(app, base_url="http://testserver")
-        cm_client = TestClient(app, base_url="http://testserver")
-
-        csrf_admin = auth_login(admin_client, "admin@folio.test")
-        csrf_cm = auth_login(cm_client, "content@folio.test")
-        cat = db_session.query(Category).first()
-
-        # Content manager can write documents
-        res_ok = cm_client.post(
-            "/api/v1/admin/documents",
-            headers={"X-CSRF-Token": csrf_cm},
-            json={
-                "title": "Doc Before Revocation",
-                "content": "Valid text",
-                "summary": "Valid summary",
-                "category_id": cat.id,
-            }
-        )
-        assert res_ok.status_code == 201
-
-        # Super Admin revokes 'documents:write' from content_manager role
-        revoke_res = admin_client.put(
-            "/api/v1/admin/roles/content_manager/permissions",
-            headers={"X-CSRF-Token": csrf_admin},
-            json={"permissions": ["taxonomy:write"]}  # Revoked documents:write!
-        )
-        assert revoke_res.status_code == 200
-        assert "documents:write" not in revoke_res.json()["permissions"]
-
-        # Immediate next request by content_manager to write document -> 403 FORBIDDEN
-        res_revoked = cm_client.post(
-            "/api/v1/admin/documents",
-            headers={"X-CSRF-Token": csrf_cm},
-            json={
-                "title": "Doc After Revocation",
-                "content": "Should fail",
-                "summary": "Should fail",
-                "category_id": cat.id,
-            }
-        )
-        assert res_revoked.status_code == 403
-        assert res_revoked.json()["error"]["code"] == "FORBIDDEN"
-
-        # Restore documents:write to content_manager
-        restore_res = admin_client.put(
-            "/api/v1/admin/roles/content_manager/permissions",
-            headers={"X-CSRF-Token": csrf_admin},
-            json={"permissions": ["documents:write", "taxonomy:write"]}
-        )
-        assert restore_res.status_code == 200
+        with TestClient(app) as admin_client, TestClient(app) as reader_client:
+            csrf_admin = auth_login(admin_client, 'admin@folio.test')
+            auth_login(reader_client, 'reader@folio.test')
+            reader = db_session.query(User).filter(User.username == 'reader').first()
+            url = f'/api/v1/admin/users/{reader.id}'
+            headers = {'X-CSRF-Token': csrf_admin}
+            assert admin_client.patch(url, headers=headers, json={'role_key': 'super_admin'}).status_code == 200
+            assert reader_client.get('/api/v1/admin/documents').status_code == 200
+            assert admin_client.patch(url, headers=headers, json={'role_key': 'member'}).status_code == 200
+            assert reader_client.get('/api/v1/admin/documents').status_code == 403
+            session = reader_client.get('/api/v1/auth/session').json()
+            assert session['user']['role_key'] == 'member'
+            assert session['user']['permissions'] == []
     finally:
         app.dependency_overrides.clear()
 

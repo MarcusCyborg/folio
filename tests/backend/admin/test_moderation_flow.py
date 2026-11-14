@@ -38,7 +38,7 @@ def test_moderation_atomic_resolution_and_no_resurrect(client, db_session):
     db_session.add(report1)
     db_session.commit()
 
-    csrf_mod = auth_login(client, "moderator@folio.test")
+    csrf_mod = auth_login(client, "admin@folio.test")
 
     # Verify report in admin reports list
     reports_res = client.get("/api/v1/admin/reports?status=open").json()
@@ -86,7 +86,7 @@ def test_moderation_atomic_resolution_and_no_resurrect(client, db_session):
     db_session.add(comment_del)
     db_session.flush()
 
-    # Moderator attempts to resurrect deleted comment -> 400 CANNOT_RESURRECT_DELETED_COMMENT
+    # Super Admin attempts to resurrect deleted comment -> 400 CANNOT_RESURRECT_DELETED_COMMENT
     res_resurrect = client.patch(
         f"/api/v1/admin/comments/{comment_del.id}/status",
         headers={"X-CSRF-Token": csrf_mod},
@@ -123,7 +123,7 @@ def test_moderation_atomic_resolution_and_no_resurrect(client, db_session):
     assert post_comment_res.status_code == 403
 
     # Remove suspension
-    auth_login(client, "moderator@folio.test")
+    auth_login(client, "admin@folio.test")
     client.patch(
         f"/api/v1/admin/users/{reader.id}/commenting",
         headers={"X-CSRF-Token": csrf_mod},

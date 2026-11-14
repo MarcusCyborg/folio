@@ -168,25 +168,33 @@ erDiagram
 
 ## 3. Roles and Permissions Matrix (RBAC)
 
-Folio uses a fine-grained, database-driven capability permission system. Application endpoints enforce capabilities (e.g., `documents:write`, `moderation:manage`) rather than role string checks.
+Folio has two account roles: `super_admin` and `member`. Administrative endpoints
+continue checking named capabilities, but only Super Admin receives them. Members
+have no administrative capabilities, even if stale grants remain in the database.
+Both role permission sets are protected; the Permissions Matrix is read-only.
 
-| Capability Permission | member | content_manager | moderator | data_seo | super_admin |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| `documents:write` | - | **Yes** | - | - | **Yes** |
-| `taxonomy:write` | - | **Yes** | - | - | **Yes** |
-| `moderation:manage` | - | - | **Yes** | - | **Yes** |
-| `seo:write` | - | - | - | **Yes** | **Yes** |
-| `analytics:read` | - | - | - | **Yes** | **Yes** |
-| `users:manage` | - | - | - | - | **Yes** |
-| `roles:manage` | - | - | - | - | **Yes** |
-| `audit:read` | - | - | - | - | **Yes** |
-| `settings:write` | - | - | - | - | **Yes** |
+| Capability Permission | member | super_admin |
+| :--- | :---: | :---: |
+| `documents:write` | - | **Yes** |
+| `taxonomy:write` | - | **Yes** |
+| `moderation:manage` | - | **Yes** |
+| `seo:write` | - | **Yes** |
+| `analytics:read` | - | **Yes** |
+| `users:manage` | - | **Yes** |
+| `roles:manage` | - | **Yes** |
+| `audit:read` | - | **Yes** |
+| `settings:write` | - | **Yes** |
+
+Migration `20261114_consolidate_roles` converts retired staff accounts to Members
+without changing identity or content ownership. It removes retired roles and saves
+the prior assignments and grants in an audit record for rollback. A database check
+constraint limits role keys to the two supported values.
 
 ### Last Super Administrator Protection Invariant
 To prevent administrative lockout:
 - Any modification to user status (`is_active = false`) or role (`role_key != 'super_admin'`) executes an explicit row-locked SQL query (`SELECT ... FOR UPDATE`) checking the count of active super administrators.
 - If the target user is the final remaining active `super_admin`, the request is rejected with HTTP `409 Conflict` and transaction rolled back.
-- The `super_admin` role's capabilities cannot be modified or revoked in the Permissions Matrix.
+- Neither role can be modified in the Permissions Matrix; promote a Member explicitly to grant administration access.
 
 ---
 

@@ -13,7 +13,7 @@ from src.backend.core.session import (
     revoke_user_sessions,
 )
 from src.backend.core.exceptions import AppException
-from src.backend.models.auth import SessionModel, User, RolePermission
+from src.backend.models.auth import SessionModel, User
 from src.backend.core.audit import write_audit
 
 @dataclass
@@ -96,8 +96,8 @@ def get_effective_permissions(db: Session, role_key: str) -> Set[str]:
         all_perms = db.query(Permission.key).all()
         return {p[0] for p in all_perms}
     
-    perms = db.query(RolePermission.permission_key).filter(RolePermission.role_key == role_key).all()
-    return {p[0] for p in perms}
+    # Members and retired roles cannot inherit administrative grants from old data.
+    return set()
 
 def require_permission(permission_key: str) -> Callable:
     """Dependency factory checking that the active user possesses the requested permission."""

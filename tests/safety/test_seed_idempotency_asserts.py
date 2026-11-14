@@ -9,7 +9,7 @@ Verifies:
    - Preservation of existing canonical UUIDs (v4 and v5).
    - Uniqueness of source_url mappings.
 2. Two-Pass Seed Idempotency on Empty Database:
-   - Pass 1: Seeds clean database. Asserts exact counts (5 users, 100 published, 3 drafts, 6 categories, 123 tags).
+   - Pass 1: Seeds clean database. Asserts exact counts (2 users, 100 published, 3 drafts, 6 categories, 123 tags).
    - Preservation check: Custom edits to documents and settings must be preserved.
    - Pass 2: Re-seeds same database. Asserts zero row duplication, ID preservation, and preserved edit retention.
    - Does NOT assert that all audit log timestamps must be byte-for-byte identical (audit logs append per policy).
@@ -119,7 +119,7 @@ class TestSeedIdempotencyAndPreservation:
             tag_count_p1 = s.query(Tag).count()
             audit_count_p1 = s.query(AuditLog).count()
 
-            assert user_count_p1 == 5
+            assert user_count_p1 == 2
             assert pub_doc_count_p1 == 100
             assert draft_count_p1 == 3
             assert cat_count_p1 == 6
@@ -148,7 +148,7 @@ class TestSeedIdempotencyAndPreservation:
             audit_count_p2 = s.query(AuditLog).count()
 
             # Strict assertions: counts MUST NOT duplicate
-            assert user_count_p2 == 5, f"Users duplicated! Expected 5, got {user_count_p2}"
+            assert user_count_p2 == 2, f"Users duplicated! Expected 2, got {user_count_p2}"
             assert pub_doc_count_p2 == 100, f"Published docs duplicated! Expected 100, got {pub_doc_count_p2}"
             assert draft_count_p2 == 3, f"Drafts duplicated! Expected 3, got {draft_count_p2}"
             assert cat_count_p2 == 6, f"Categories duplicated! Expected 6, got {cat_count_p2}"

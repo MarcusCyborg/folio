@@ -289,7 +289,7 @@ def test_document_detail_reading_like_and_discussions(browser_instance):
     page.wait_for_selector("#userMenuContent a[href='#/login']")
 
     page.goto(f"{BASE_URL}/#/login")
-    page.locator("#loginEmail").fill("content@folio.test")
+    page.locator("#loginEmail").fill("admin@folio.test")
     page.locator("#loginPassword").fill("FolioDemo2026!")
     page.locator("#loginSubmitBtn").click()
     page.wait_for_url("**/#/library")

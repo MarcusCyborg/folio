@@ -113,9 +113,7 @@ export async function refreshSession({ broadcast = false } = {}) {
 export function can(permission) {
   if (!sessionState.user) return false;
   const user = sessionState.user;
-  if (user.role_key === 'super_admin') return true;
-  if (!user.permissions || !Array.isArray(user.permissions)) return false;
-  return user.permissions.includes(permission);
+  return user.role_key === 'super_admin';
 }
 
 export function subscribeSession(listener) {

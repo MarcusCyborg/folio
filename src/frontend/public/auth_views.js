@@ -45,9 +45,6 @@ export async function renderLogin(container, routeContext) {
           <div style="font-size: 0.8rem; color: var(--color-muted); line-height: 1.6;">
             <strong>Local Demonstration Accounts:</strong><br />
             <code>admin@folio.test</code> (Super Admin)<br />
-            <code>content@folio.test</code> (Content Manager)<br />
-            <code>moderator@folio.test</code> (Moderator)<br />
-            <code>seo@folio.test</code> (Data & SEO Specialist)<br />
             <code>reader@folio.test</code> (Reader)<br />
             Password: <code>FolioDemo2026!</code>
           </div>
@@ -385,7 +382,7 @@ export async function renderProfile(container, routeContext) {
 
       ${isSuspended ? `
         <div class="notice notice-error" style="margin-bottom: 2rem;">
-          <strong>Commenting Privilege Notice:</strong> Your commenting and discussion privileges are currently suspended by a moderator until <strong>${suspensionDate.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}</strong>.
+          <strong>Commenting Privilege Notice:</strong> Your commenting and discussion privileges are currently suspended by an administrator until <strong>${suspensionDate.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}</strong>.
         </div>
       ` : ''}
 

@@ -143,7 +143,7 @@ class TestBrowserIsolationAndOrderIndependence:
 
         with Session() as s:
             assert s.query(Document).filter(Document.title.like("Quantum%")).count() == 0
-            assert s.query(User).count() == 5
+            assert s.query(User).count() == 2
 
 
 class TestTrackedEvidenceImmutability:
