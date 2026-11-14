@@ -440,7 +440,6 @@ export async function renderLibrary(container, routeContext) {
 
             <!-- Sort By Selector (Disabled when search mode is active) -->
             <div class="control-group" id="sortWrapper" style="${isSearchMode ? 'display: none;' : 'display: flex;'}">
-              <label for="librarySortSelect" class="control-label">Sort:</label>
               <select class="select select-sm" id="librarySortSelect" aria-label="Sort documents" ${isSearchMode ? 'disabled' : ''}>
                 <option value="newest" ${sort === 'newest' ? 'selected' : ''}>Newest First</option>
                 <option value="oldest" ${sort === 'oldest' ? 'selected' : ''}>Oldest First</option>
