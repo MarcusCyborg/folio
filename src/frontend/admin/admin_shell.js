@@ -60,8 +60,9 @@ export function wrapAdminLayout(currentPath, pageTitle, contentHtml) {
   }).join('');
 
   const session = getSession();
-  const userName = session.user ? (session.user.display_name || session.user.username) : 'Staff';
-  const roleLabel = session.user ? session.user.role_key.replace('_', ' ') : 'Guest';
+  const userName = (session.user ? (session.user.display_name || session.user.username) : 'Staff').trim();
+  const roleLabel = (session.user ? session.user.role_key.replace(/_/g, ' ') : 'Guest').trim();
+  const isDuplicateLabel = userName.toLowerCase() === roleLabel.toLowerCase();
 
   return `
     <div class="admin-page">
@@ -70,7 +71,7 @@ export function wrapAdminLayout(currentPath, pageTitle, contentHtml) {
           <div class="admin-sidebar-header">
             <div class="admin-sidebar-kicker">Folio Workspace</div>
             <div class="admin-sidebar-user">
-              <strong>${escapeText(userName)}</strong>
+              ${isDuplicateLabel ? '' : `<strong>${escapeText(userName)}</strong>`}
               <span class="role-chip">${escapeText(roleLabel)}</span>
             </div>
           </div>

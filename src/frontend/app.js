@@ -43,10 +43,13 @@ function renderUserMenu(session) {
 
   if (session && session.user) {
     const user = session.user;
+    const displayName = (user.display_name || user.username || '').trim();
+    const roleLabel = (user.role_key || '').replace(/_/g, ' ').trim();
+    const isDuplicateLabel = displayName.toLowerCase() === roleLabel.toLowerCase();
     content.innerHTML = `
       <div class="user-badge">
-        <span>${escapeText(user.display_name)}</span>
-        <span class="role-chip">${escapeText(user.role_key.replace('_', ' '))}</span>
+        ${isDuplicateLabel ? '' : `<span>${escapeText(displayName)}</span>`}
+        <span class="role-chip">${escapeText(roleLabel)}</span>
       </div>
       <a href="#/profile" class="btn btn-secondary btn-sm">Profile</a>
       <button class="btn btn-secondary btn-sm" id="logoutBtn">Sign Out</button>
