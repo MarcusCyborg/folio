@@ -1259,6 +1259,7 @@ async function fetchAndDisplayDocuments(instance, routeContext, { isInitialMount
         if (catBtn) {
           catBtn.onclick = (e) => {
             e.preventDefault();
+            e.stopPropagation();
             const cid = catBtn.getAttribute('data-cat-id');
             if (cid) updateRoute({ category_id: cid });
           };
@@ -1268,6 +1269,7 @@ async function fetchAndDisplayDocuments(instance, routeContext, { isInitialMount
         itemEl.querySelectorAll('.tag-chip').forEach((btn) => {
           btn.onclick = (e) => {
             e.preventDefault();
+            e.stopPropagation();
             const tid = btn.getAttribute('data-tag-id');
             updateRoute({ tag_ids: tid });
           };
@@ -1312,6 +1314,14 @@ async function fetchAndDisplayDocuments(instance, routeContext, { isInitialMount
 
             // Start managed prefetch with immediate rejection handling & ownership handoff
             startDocumentPrefetch(doc);
+          });
+
+          // Make the entire document card clickable
+          itemEl.addEventListener('click', (e) => {
+            if (e.target.closest('a, button')) return;
+            const selection = window.getSelection();
+            if (selection && selection.toString().trim().length > 0) return;
+            titleLink.click();
           });
         }
 

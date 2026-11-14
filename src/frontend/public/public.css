@@ -451,6 +451,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: 1.25rem 1.5rem;
+  cursor: pointer;
   transition: border-color var(--duration-fast) var(--ease-folio),
               box-shadow var(--duration-fast) var(--ease-folio);
   box-shadow: 0 1px 3px rgba(32, 50, 61, 0.04);
@@ -485,6 +486,7 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
+  .document-card-row:hover .doc-row-title a,
   .doc-row-title a:hover {
     color: var(--color-accent);
     background-size: 100% 1.5px;
