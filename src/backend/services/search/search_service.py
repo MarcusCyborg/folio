@@ -3,10 +3,11 @@ import threading
 import time
 import uuid
 import re
+import logging
 from datetime import datetime, timezone, date, timedelta
 from typing import Callable, Dict, List, Optional, Tuple, Any, Set, TypeVar
 from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import text, or_
+from sqlalchemy import text, or_, case
 
 from src.backend.core.config import settings
 from src.backend.core.exceptions import AppException
@@ -395,18 +396,19 @@ class SearchService:
             Document.deleted_at.is_(None),
         )
 
-        # B06: Escape % and _ in query_str to prevent wildcard injection
-        escaped_query = (
-            query_str.replace("\\", "\\\\")
-            .replace("%", "\\%")
-            .replace("_", "\\_")
-        )
-        pattern = f"%{escaped_query}%"
-        q = q.filter(
-            (Document.title.ilike(pattern, escape="\\"))
-            | (Document.summary.ilike(pattern, escape="\\"))
-            | (Document.content.ilike(pattern, escape="\\"))
-        )
+        terms = list(dict.fromkeys(default_analyzer.tokenize(query_str)))
+        if not terms:
+            return [], 0
+        matches, title_matches = [], []
+        for term in terms:
+            escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{escaped}%"
+            title_match = Document.title.ilike(pattern, escape="\\")
+            title_matches.append(case((title_match, 1), else_=0))
+            matches.append(or_(title_match, Document.summary.ilike(pattern, escape="\\"),
+                               Document.content.ilike(pattern, escape="\\")))
+        q = q.filter(or_(*matches))
+        coverage = sum(case((match, 1), else_=0) for match in matches)
 
         if category_id:
             q = q.filter(Document.category_id == category_id)
@@ -425,7 +427,7 @@ class SearchService:
         total_matches = q.count()
 
         # R3-06: Preserve full candidate ordering without artificial 1000-row cap unless top_k is explicitly requested
-        ordered_q = q.order_by(Document.created_at.desc(), Document.id.asc())
+        ordered_q = q.order_by(coverage.desc(), sum(title_matches).desc(), Document.id.asc())
         if top_k is not None:
             ordered_q = ordered_q.limit(top_k)
         doc_rows = ordered_q.all()
@@ -435,9 +437,9 @@ class SearchService:
             hits.append(
                 CandidateHit(
                     doc_id=doc_id,
-                    score=round(1.0 / idx, 6),
+                    score=0.0,
                     rank=idx,
-                    raw_bm25=1.0,
+                    raw_bm25=0.0,
                     title_boost=1.0,
                 )
             )
@@ -640,6 +642,15 @@ class SearchService:
             else:
                 # Initial search (page 1): execute IR retrieval
                 active_gen = GenerationManager.get_active_generation(db)
+                database_index = None
+                if settings.INDEX_STORAGE_BACKEND == "database":
+                    from src.backend.search_index.database_storage import ensure_database_generation
+                    try:
+                        active_gen, database_index = ensure_database_generation(db)
+                    except Exception:
+                        db.rollback()
+                        logging.getLogger(__name__).exception("Database BM25 index unavailable")
+                        active_gen = None
                 index_generation_id = active_gen.id if active_gen else "fallback-none"
 
                 # Execute based on requested mode
@@ -673,9 +684,11 @@ class SearchService:
                                 date_from=date_from_utc,
                                 date_to=date_to_utc,
                                 generation_id=active_gen.id,
+                                enable_title_boost=True,
+                                title_weight=1.5,
                                 top_k=100,
                             )
-                            sres = self.engine.search(sq)
+                            sres = self.engine.search(sq, index=database_index) if database_index is not None else self.engine.search(sq)
                             candidate_ids = [h.doc_id for h in sres.candidates]
                             for h in sres.candidates:
                                 candidate_scores_map[h.doc_id] = h.score
@@ -717,9 +730,11 @@ class SearchService:
                                     date_from=date_from_utc,
                                     date_to=date_to_utc,
                                     generation_id=active_gen.id,
+                                    enable_title_boost=True,
+                                    title_weight=1.5,
                                     top_k=100,
                                 )
-                                sres = self.engine.search(sq)
+                                sres = self.engine.search(sq, index=database_index) if database_index is not None else self.engine.search(sq)
                                 engine_used = "fallback_bm25"
                                 degraded_reason = sem_error
                                 candidate_ids = [h.doc_id for h in sres.candidates]
@@ -783,9 +798,11 @@ class SearchService:
                                 date_from=date_from_utc,
                                 date_to=date_to_utc,
                                 generation_id=active_gen.id,
+                                enable_title_boost=True,
+                                title_weight=1.5,
                                 top_k=100,
                             )
-                            sres = self.engine.search(sq)
+                            sres = self.engine.search(sq, index=database_index) if database_index is not None else self.engine.search(sq)
                             bm25_hits = sres.candidates
                             bm25_total_matches = sres.total_matches
                         except Exception:
@@ -973,7 +990,7 @@ class SearchService:
                         title=doc.title,
                         summary=doc.summary or "",
                         snippet=snippet,
-                        score=item_score,
+                        score=None if engine_used == "ilike_fallback" else item_score,
                         rank=abs_rank,
                         author=doc.author or "Folio Contributor",
                         category=cat_obj,

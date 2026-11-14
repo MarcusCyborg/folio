@@ -13,7 +13,7 @@ class SearchItem(BaseModel):
     title: str
     summary: str
     snippet: str
-    score: float
+    score: Optional[float] = None
     rank: int
     author: str
     category: Optional[SearchTaxon] = None

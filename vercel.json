@@ -1,5 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "env": {
+    "INDEX_STORAGE_BACKEND": "database"
+  },
   "functions": {
     "src/backend/main.py": {
       "includeFiles": "src/frontend/**"

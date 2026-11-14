@@ -56,8 +56,13 @@ def generate_snippet(
             return escaped[:max_length].rstrip() + "..."
         return escaped
 
-    # Select snippet window centered around the first match
-    first_match = matches[0]
+    # Prefer a passage covering all query terms over an early incidental mention.
+    def window_quality(match):
+        start = max(0, match.start() - 40)
+        window = normalized_source[start:start + max_length]
+        return len({m.group(0).casefold() for m in pattern_regex.finditer(window)})
+
+    first_match = max(matches, key=window_quality)
     match_start = first_match.start()
     match_end = first_match.end()
 

@@ -78,6 +78,11 @@ class Settings:
         self.RATE_LIMIT_SEARCH_WINDOW_SECONDS: int = int(os.getenv("RATE_LIMIT_SEARCH_WINDOW_SECONDS", "60"))
 
         # P05 Search & Semantic Engine Configuration
+        self.INDEX_STORAGE_BACKEND: str = os.getenv(
+            "INDEX_STORAGE_BACKEND", "database" if os.getenv("VERCEL") == "1" else "filesystem"
+        ).strip().lower()
+        if self.INDEX_STORAGE_BACKEND not in ("database", "filesystem"):
+            raise ValueError("INDEX_STORAGE_BACKEND must be database or filesystem")
         self.SEARCH_CONTEXT_TTL_MINUTES: int = int(os.getenv("SEARCH_CONTEXT_TTL_MINUTES", "15"))
         self.SEARCH_TIMEOUT_SECONDS: float = float(os.getenv("SEARCH_TIMEOUT_SECONDS", "5.0"))
         self.SEMANTIC_EXECUTOR_WORKERS: int = max(1, int(os.getenv("SEMANTIC_EXECUTOR_WORKERS", "2")))

@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
+from src.backend.core.config import settings
 
 from src.backend.models.document import Document
 from src.backend.models.taxonomy import Category
@@ -62,6 +63,10 @@ class GenerationManager:
         If build or verification fails, the new generation is marked 'failed'
         and the previously active generation remains completely untouched.
         """
+        if settings.INDEX_STORAGE_BACKEND == "database":
+            from src.backend.search_index.database_storage import ensure_database_generation
+            generation, _ = ensure_database_generation(db, force=force)
+            return generation
         now = datetime.now(timezone.utc)
 
         # Check for in-progress builds
@@ -251,6 +256,21 @@ class GenerationManager:
         errors = []
         checks = []
 
+        if (gen_rec.manifest or {}).get("storage_backend") == "database":
+            from src.backend.search_index.database_storage import load_index, source_signature
+            try:
+                index = load_index(gen_rec)
+                checks.append("manifest_integrity_valid")
+                if gen_rec.manifest.get("source_signature") != source_signature(db):
+                    errors.append("Indexed source differs from published documents")
+                return {
+                    "valid": not errors, "generation_id": gen_rec.id,
+                    "status": gen_rec.status, "doc_count": gen_rec.doc_count,
+                    "indexed_count": index.total_docs, "checks": checks, "errors": errors,
+                }
+            except (ValueError, KeyError, OSError, EOFError) as exc:
+                return {"valid": False, "generation_id": gen_rec.id, "errors": [str(exc)]}
+
         # 1. Storage checks
         storage = GenerationStorage(gen_rec.id)
         valid_storage, storage_errs = storage.verify_integrity()
@@ -392,8 +412,11 @@ class GenerationManager:
                 # Safe to purge
                 gen.status = "archived"
                 gen.updated_at = now
-                storage = GenerationStorage(gen.id)
-                storage.purge()
+                if (gen.manifest or {}).get("storage_backend") == "database":
+                    gen.manifest = {"storage_backend": "database", "purged": True}
+                else:
+                    storage = GenerationStorage(gen.id)
+                    storage.purge()
                 purged.append(gen.id)
 
         if purged:

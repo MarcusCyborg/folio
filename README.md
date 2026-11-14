@@ -291,6 +291,26 @@ The pipeline executes:
 
 ## 8. Troubleshooting
 
+### BM25 on Vercel
+
+Vercel uses `INDEX_STORAGE_BACKEND=database` (set in `vercel.json`). Compressed,
+checksummed BM25 postings are stored in `index_generations.manifest`, so cold
+instances share the same index without writing local files. The first search
+builds it automatically. Changes to published content, categories, dates, or tags
+create a new generation on the next search; existing pagination contexts retain
+their original ordering. No additional database migration is required.
+
+This backend checks a fingerprint of the published corpus on each new search,
+which suits the current small library. Larger installations should use the
+filesystem backend with a persistent shared volume and the index worker, or move
+index builds to a dedicated service. The build, verify, and generation cleanup
+commands support database generations as well. Page views do not rebuild indexes.
+
+If the index cannot be loaded or built, keyword fallback matches individual query
+terms and orders by term coverage, then title matches. Its API `score` is `null`;
+the UI does not show a fabricated relevance score. Check `/health/ready` to see
+which search backend is available.
+
 - **PostgreSQL Connection Error:** Ensure PostgreSQL is active on port 5432 and the `folio` database exists (`createdb -U postgres folio`).
 - **CSRF Token Rejected (403 Forbidden):** The frontend handles CSRF tokens automatically via `GET /api/v1/auth/session` and sends `X-CSRF-Token` headers. If testing via curl/Postman, fetch `/api/v1/auth/session` first to obtain a valid session cookie and CSRF token.
 - **Permission Denied (403 Forbidden) on Admin Routes:** Verify that the signed-in account holds the necessary capability permission. Refer to the demo accounts table above.

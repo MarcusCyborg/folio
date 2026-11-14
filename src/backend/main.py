@@ -174,9 +174,14 @@ def readiness_check(response: Response, db: Session = Depends(get_db)):
 
         active_gen = GenerationManager.get_active_generation(db)
         if active_gen:
-            storage = GenerationStorage(active_gen.id)
-            stats_path = storage.postings_dir / "index_stats.json"
-            if stats_path.exists():
+            if settings.INDEX_STORAGE_BACKEND == "database":
+                from src.backend.search_index.database_storage import load_index, source_signature
+                load_index(active_gen)
+                index_available = active_gen.manifest.get("source_signature") == source_signature(db)
+            else:
+                storage = GenerationStorage(active_gen.id)
+                index_available = (storage.postings_dir / "index_stats.json").exists()
+            if index_available:
                 search_info = {
                     "engine": "bm25",
                     "status": "ready",
@@ -188,7 +193,7 @@ def readiness_check(response: Response, db: Session = Depends(get_db)):
                 }
             else:
                 search_info["degraded_reason"] = (
-                    f"Generation {active_gen.generation_num} active in DB but posting files missing on disk"
+                    f"Generation {active_gen.generation_num} needs rebuilding or its postings are unavailable"
                 )
     except Exception as exc:
         search_info["degraded_reason"] = f"Failed to inspect index generation: {str(exc)}"

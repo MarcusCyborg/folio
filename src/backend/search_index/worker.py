@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Callable, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func
+from src.backend.core.config import settings
 
 from src.backend.models.document import Document
 from src.backend.models.search_index import IndexJob, IndexGeneration
@@ -172,6 +173,25 @@ class IndexWorker:
                     job.error_message = "Skipped stale revision"
                     db.commit()
                     return True
+
+            if settings.INDEX_STORAGE_BACKEND == "database":
+                from src.backend.search_index.database_storage import ensure_database_generation
+                ensure_database_generation(db)
+                if job.operation == "upsert" and doc and doc.status == "published" and doc.deleted_at is None:
+                    self._get_semantic_adapter().upsert_document(
+                        doc_id=doc.id, title=doc.title, summary=doc.summary,
+                        content=doc.content, source_url=doc.source_url,
+                        revision_hash=job.revision_hash,
+                    )
+                else:
+                    self._get_semantic_adapter().delete_document(job.document_id)
+                job.state = "completed"
+                job.completed_at = now
+                job.locked_at = None
+                job.locked_by = None
+                job.error_message = None
+                db.commit()
+                return True
 
             active_gen = GenerationManager.get_active_generation(db)
             if not active_gen:
