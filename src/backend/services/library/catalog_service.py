@@ -14,11 +14,18 @@ from src.backend.core.wiki_content import clean_wikipedia_content
 from src.backend.core.exceptions import AppException
 from src.backend.schemas.library import DocumentSummary, DocumentDetail, Taxon
 
+def normalize_site_name(raw_name: object) -> object:
+    if not isinstance(raw_name, str):
+        return raw_name
+    name = re.sub(r"\s*—\s*", ": ", raw_name)
+    name = re.sub(r"\s*:\s*", ": ", name)
+    return re.sub(r"^Folio\s*:", "Folio:", name)
+
 def get_public_settings(db: Session) -> dict:
     settings = db.query(AppSetting).all()
     setting_map = {s.key: s.value for s in settings}
     raw_site_name = setting_map.get("site_name", "Folio: Knowledge & Research Library")
-    site_name = raw_site_name.replace("—", ":") if isinstance(raw_site_name, str) else raw_site_name
+    site_name = normalize_site_name(raw_site_name)
     return {
         "site_name": site_name,
         "site_description": setting_map.get("site_description", "Curated research repository"),

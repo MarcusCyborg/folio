@@ -107,7 +107,12 @@ export async function loadPublicSettings() {
   try {
     const data = await api('/settings/public');
     if (data) {
-      if (data.site_name) data.site_name = data.site_name.replace('—', ':');
+      if (data.site_name) {
+        data.site_name = data.site_name
+          .replace(/\s*—\s*/g, ': ')
+          .replace(/\s*:\s*/g, ': ')
+          .replace(/^Folio\s*:/g, 'Folio:');
+      }
       publicSettings = { ...publicSettings, ...data };
       const brandEl = document.getElementById('shellBrandName');
       const taglineEl = document.getElementById('shellBrandTagline');
