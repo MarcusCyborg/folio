@@ -427,12 +427,12 @@ export async function renderLibrary(container, routeContext) {
           </div>
 
           <div class="library-controls-right">
-            <!-- Retrieval Mode Selector -->
-            <div class="control-group">
+            <!-- Retrieval Mode Selector (Hidden) -->
+            <div class="control-group" style="display: none;">
               <label for="libraryModeSelect" class="control-label">Mode:</label>
               <select class="select select-sm" id="libraryModeSelect" aria-label="Search mode selection">
                 <option value="bm25" ${mode === 'bm25' ? 'selected' : ''}>BM25 Keyword</option>
-                <option value="vector" ${mode === 'vector' ? 'selected' : ''}>Semantic Vector</option>
+                <option value="semantic" ${mode === 'semantic' ? 'selected' : ''}>Semantic Vector</option>
                 <option value="hybrid" ${mode === 'hybrid' ? 'selected' : ''}>Hybrid Reciprocal</option>
               </select>
             </div>
