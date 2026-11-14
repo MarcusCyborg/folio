@@ -12,6 +12,7 @@ const USERNAME_REGEX = /^[a-z0-9_]{3,30}$/;
 export async function renderLogin(container, routeContext) {
   const { query } = routeContext;
   const nextPath = query.get('next') || '/library';
+  const isLocalDemo = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
 
   document.title = 'Sign In — Folio';
 
@@ -24,7 +25,7 @@ export async function renderLogin(container, routeContext) {
         <form id="loginForm" class="auth-form" novalidate>
           <div class="field">
             <label class="label" for="loginEmail">Email Address</label>
-            <input class="input" type="email" id="loginEmail" placeholder="reader@folio.test" required autocomplete="email" aria-describedby="loginEmailError" />
+            <input class="input" type="email" id="loginEmail" placeholder="you@example.com" required autocomplete="email" aria-describedby="loginEmailError" />
             <span class="field-error-text" id="loginEmailError" style="display: none;" role="alert"></span>
           </div>
 
@@ -41,6 +42,7 @@ export async function renderLogin(container, routeContext) {
 
         <div class="auth-footer-links">
           <span>Need an account? <a href="#/register">Join Folio</a></span>
+          ${isLocalDemo ? `
           <hr style="border: none; border-top: 1px solid var(--color-border); margin: 1.25rem 0;" />
           <div style="font-size: 0.8rem; color: var(--color-muted); line-height: 1.6;">
             <strong>Local Demonstration Accounts:</strong><br />
@@ -48,6 +50,7 @@ export async function renderLogin(container, routeContext) {
             <code>reader@folio.test</code> (Reader)<br />
             Password: <code>FolioDemo2026!</code>
           </div>
+          ` : ''}
         </div>
       </div>
     </div>
