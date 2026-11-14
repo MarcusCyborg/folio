@@ -20,7 +20,7 @@ def filter_attributes(tag, name, value):
                 return False
             return True
     elif tag == 'img':
-        if name in ['alt', 'title', 'loading', 'width', 'height']:
+        if name in ['alt', 'title', 'loading', 'decoding', 'width', 'height']:
             return True
         if name == 'src':
             return '"' not in value and '&quot;' not in value

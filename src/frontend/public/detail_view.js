@@ -257,7 +257,7 @@ export async function renderDocumentDetail(container, routeContext) {
 
           ${safeCoverImageUrl ? `
             <div class="detail-cover-container">
-              <img src="${escapeAttr(safeCoverImageUrl)}" alt="${escapeAttr(doc.cover_image_alt || doc.title)}" class="detail-cover-image" loading="lazy" />
+              <img src="${escapeAttr(safeCoverImageUrl)}" alt="${escapeAttr(doc.cover_image_alt || doc.title)}" class="detail-cover-image" loading="lazy" decoding="async" />
               ${doc.cover_image_alt ? `<div class="detail-cover-caption">${escapeText(doc.cover_image_alt)}</div>` : ''}
             </div>
           ` : ''}
@@ -345,9 +345,63 @@ export async function renderDocumentDetail(container, routeContext) {
       setSharedTitle(detailTitleEl, doc.id);
     }
 
+    // Handle cover image load failure cleanly via event listener (no inline onerror, no retry loop)
+    const coverImgEl = contentEl.querySelector('.detail-cover-image');
+    if (coverImgEl) {
+      coverImgEl.addEventListener('error', () => {
+        const coverContainer = coverImgEl.closest('.detail-cover-container');
+        if (coverContainer) {
+          coverContainer.classList.add('detail-cover-broken');
+        }
+        coverImgEl.remove();
+      }, { once: true });
+    }
+
     // Generate Table of Contents from clean source headings BEFORE rendering KaTeX math (R3-07)
     const readingColumn = contentEl.querySelector('.document-reading-column');
     if (readingColumn) {
+      // Enhance inline Markdown images: lazy loading, async decoding, alt fallback, caption pairing, and error listener
+      readingColumn.querySelectorAll('img').forEach((imgEl) => {
+        if (!imgEl.getAttribute('loading')) {
+          imgEl.setAttribute('loading', 'lazy');
+        }
+        if (!imgEl.getAttribute('decoding')) {
+          imgEl.setAttribute('decoding', 'async');
+        }
+        const altVal = (imgEl.getAttribute('alt') || '').trim();
+        if (!altVal) {
+          imgEl.setAttribute('alt', doc.title || 'Article illustration');
+        }
+
+        const parentP = imgEl.parentElement;
+        if (parentP && parentP.tagName === 'P' && parentP.children.length === 1 && (parentP.textContent || '').trim() === '') {
+          parentP.classList.add('markdown-figure-paragraph');
+          const nextEl = parentP.nextElementSibling;
+          if (nextEl && nextEl.tagName === 'P' && nextEl.children.length === 1 && nextEl.firstElementChild && nextEl.firstElementChild.tagName === 'EM') {
+            nextEl.classList.add('markdown-figure-caption');
+          }
+        }
+
+        imgEl.addEventListener('error', () => {
+          if (imgEl.dataset.fallbackApplied === '1') return;
+          imgEl.dataset.fallbackApplied = '1';
+          const fallbackAlt = (imgEl.getAttribute('alt') || '').trim();
+          const containerP = imgEl.closest('p');
+          imgEl.classList.add('markdown-img-broken');
+          if (containerP) {
+            containerP.classList.add('markdown-figure-broken');
+            const nextCaption = containerP.nextElementSibling;
+            const hasAdjacentCaption = Boolean(nextCaption && nextCaption.classList.contains('markdown-figure-caption'));
+            if (fallbackAlt && !hasAdjacentCaption) {
+              const note = document.createElement('span');
+              note.className = 'markdown-img-fallback-note';
+              note.textContent = `[Illustration unavailable: ${fallbackAlt}]`;
+              containerP.appendChild(note);
+            }
+          }
+          imgEl.remove();
+        }, { once: true });
+      });
       const headings = readingColumn.querySelectorAll('h1, h2, h3');
       if (headings.length >= 2) {
         const tocItems = [];

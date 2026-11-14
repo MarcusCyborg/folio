@@ -18,7 +18,11 @@ def cmd_import_corpus(args) -> int:
     db = SessionLocal()
     try:
         importer = CorpusImporter(db, dry_run=args.dry_run)
-        report = importer.import_corpus(input_path, batch_size=args.batch_size)
+        report = importer.import_corpus(
+            input_path,
+            batch_size=args.batch_size,
+            backfill_images=getattr(args, "backfill_images", False),
+        )
         print(json.dumps(report, indent=2))
         return 0
     finally:
@@ -83,6 +87,11 @@ def main(argv=None) -> int:
     p_import = subparsers.add_parser("import-corpus", help="Import legacy JSON/JSONL corpus idempotently")
     p_import.add_argument("--input", "-i", required=True, help="Path to input .json or .jsonl file")
     p_import.add_argument("--dry-run", action="store_true", help="Perform dry-run analysis without DB writes")
+    p_import.add_argument(
+        "--backfill-images",
+        action="store_true",
+        help="Match existing documents by source_url and backfill missing cover_image_url and cover_image_alt only",
+    )
     p_import.add_argument("--batch-size", type=int, default=100, help="Batch commit size (default: 100)")
     p_import.set_defaults(func=cmd_import_corpus)
 

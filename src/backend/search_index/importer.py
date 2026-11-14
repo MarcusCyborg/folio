@@ -1,8 +1,10 @@
 import json
+import re
 import uuid
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Tuple
+from urllib.parse import urlsplit
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -18,11 +20,112 @@ def generate_doc_uuid_from_url(url: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, url.strip()))
 
 
+def _strip_markdown_images_and_links(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", text)
+    cleaned = re.sub(r"\(\[Image source\]\([^)]+\)\)", "", cleaned)
+    cleaned = re.sub(r"\[Image source\]\([^)]+\)", "", cleaned)
+    cleaned = re.sub(r"https?://(?:upload|thumb)\.wikimedia\.org/\S+", "", cleaned)
+    cleaned = re.sub(r"//(?:upload|thumb)\.wikimedia\.org/\S+", "", cleaned)
+    return cleaned.strip()
+
+
+def extract_prose_summary(content: str, title: str, raw_summary: str = "", max_len: int = 400) -> str:
+    """
+    Produces a clean plain-text summary free of Markdown image syntax or image URLs.
+    """
+    if raw_summary:
+        cleaned_raw = _strip_markdown_images_and_links(raw_summary)
+        cleaned_raw = re.sub(r"\s+", " ", cleaned_raw).strip()
+        if cleaned_raw and not cleaned_raw.startswith("!["):
+            return cleaned_raw[:max_len]
+
+    if not content:
+        return (title or "")[:max_len]
+
+    fallback_line = ""
+    for line in content.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(("![", "#", "|", "```", "~~~", ">")):
+            continue
+        if re.match(r"^={2,6}\s+.*\s+={2,6}$", stripped):
+            continue
+        no_img = _strip_markdown_images_and_links(stripped)
+        if not no_img:
+            continue
+        if no_img.startswith("*") and no_img.endswith("*") and len(no_img) < 220:
+            # Skip standalone italicized image caption lines
+            continue
+        plain = re.sub(r"\*\*([^*]+)\*\*", r"\1", no_img)
+        plain = re.sub(r"\*([^*]+)\*", r"\1", plain)
+        plain = re.sub(r"\s+", " ", plain).strip()
+        if not plain:
+            continue
+        if not fallback_line:
+            fallback_line = plain
+        if len(plain) >= 60:
+            return plain[:max_len]
+
+    return (fallback_line or title or "")[:max_len]
+
+
+def _normalize_cover_url(raw_url: Optional[str]) -> Optional[str]:
+    if not raw_url or not isinstance(raw_url, str):
+        return None
+    val = raw_url.strip()
+    if not val:
+        return None
+    if val.startswith("//"):
+        val = "https:" + val
+    if val.startswith("/assets/"):
+        return val[:1000]
+    try:
+        parsed = urlsplit(val)
+    except ValueError:
+        return None
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return None
+    if parsed.scheme == "http" and (
+        parsed.hostname.endswith(".wikimedia.org") or parsed.hostname.endswith(".wikipedia.org")
+    ):
+        val = "https://" + val[len("http://") :]
+    if len(val) > 1000 or '"' in val or "'" in val:
+        return None
+    return val
+
+
+def _extract_cover_from_item(item: Dict[str, Any], title: str, content: str = "") -> Tuple[Optional[str], Optional[str]]:
+    cover_url = _normalize_cover_url(item.get("cover_image_url"))
+    cover_alt = (item.get("cover_image_alt") or "").strip() if isinstance(item.get("cover_image_alt"), str) else ""
+
+    if not cover_url and content:
+        m = re.search(r"!\[([^\]]*)\]\((https?://[^)\s]+)\)", content)
+        if m:
+            cand_alt, cand_url = m.group(1).strip(), m.group(2).strip()
+            norm_cand = _normalize_cover_url(cand_url)
+            if norm_cand:
+                cover_url = norm_cand
+                if not cover_alt and cand_alt:
+                    cover_alt = cand_alt
+
+    if not cover_url:
+        return None, None
+
+    final_alt = re.sub(r"\s+", " ", cover_alt or title or "Article cover image").strip()
+    if len(final_alt) > 255:
+        final_alt = final_alt[:252].rstrip() + "..."
+    return cover_url, final_alt
+
+
 class CorpusImporter:
     """
     Importer for legacy JSON/JSONL corpus datasets.
     Maps source URL -> Folio Document ID idempotently, validates attribution & license,
-    protects against overwriting user edits, and generates duplicate/conflict reports.
+    protects against overwriting user edits, supports targeted cover image backfill,
+    and generates duplicate/conflict reports.
     """
 
     def __init__(self, db: Session, dry_run: bool = False):
@@ -67,10 +170,12 @@ class CorpusImporter:
         batch_size: int = 100,
         default_author: str = "Wikipedia contributors",
         default_license: str = "CC BY-SA 4.0",
+        backfill_images: bool = False,
     ) -> Dict[str, Any]:
         """
         Parses corpus file, generates duplicate and conflict reports,
-        and optionally ingests new documents into PostgreSQL.
+        and optionally ingests new documents (or backfills missing cover images
+        for existing documents when backfill_images=True) into PostgreSQL.
         """
         records, bad_lines = self.load_raw_records(file_path)
 
@@ -90,11 +195,11 @@ class CorpusImporter:
         admin_id = admin_user.id if admin_user else None
 
         seen_urls_in_file: Dict[str, int] = {}
-        seen_ids_in_file: Dict[str, int] = {}
 
         report: Dict[str, Any] = {
             "file": str(file_path),
             "dry_run": self.dry_run,
+            "backfill_images": backfill_images,
             "total_scanned": len(records),
             "bad_lines": bad_lines,
             "valid_records": 0,
@@ -103,21 +208,27 @@ class CorpusImporter:
             "conflicts_with_db": [],
             "existing_preserved": [],
             "to_insert": [],
+            "to_backfill": [],
+            "backfill_skipped": [],
             "attribution_verified": 0,
             "license_verified": 0,
             "inserted_count": 0,
             "preserved_count": 0,
+            "would_update_count": 0,
+            "updated_count": 0,
+            "skipped_count": 0,
         }
 
         now = datetime.now(timezone.utc)
         to_create_docs = []
+        to_backfill_docs: List[Tuple[Document, str, str]] = []
 
         for idx, item in enumerate(records, start=1):
             source_url = (item.get("source_url") or item.get("url") or "").strip()
             title = (item.get("title") or "").strip()
             content = (item.get("content") or item.get("text") or "").strip()
             content = clean_wikipedia_content(content, source_url)
-            summary = (item.get("summary") or "").strip()
+            raw_summary = (item.get("summary") or "").strip()
 
             # Validate minimum requirements
             if not source_url:
@@ -130,10 +241,8 @@ class CorpusImporter:
                 report["invalid_records"].append({"index": idx, "url": source_url, "reason": "Missing content"})
                 continue
 
-            if not summary:
-                # Extract first non-empty paragraph or up to 400 chars as meaningful summary
-                lines = [line.strip() for line in content.split("\n") if line.strip()]
-                summary = lines[0][:400] if lines else title
+            summary = extract_prose_summary(content, title, raw_summary=raw_summary, max_len=400)
+            cover_image_url, cover_image_alt = _extract_cover_from_item(item, title=title, content=content)
 
             # Check in-file duplicate source URLs
             if source_url in seen_urls_in_file:
@@ -156,9 +265,70 @@ class CorpusImporter:
             if source_attrib:
                 report["attribution_verified"] += 1
 
-            # Check if source_url already exists in PostgreSQL -> IDEMPOTENT PRESERVATION
+            # Check if source_url already exists in PostgreSQL
             if source_url in existing_docs_by_url:
                 existing_doc = existing_docs_by_url[source_url]
+                if backfill_images:
+                    if existing_doc.deleted_at is not None:
+                        report["backfill_skipped"].append({
+                            "url": source_url,
+                            "document_id": existing_doc.id,
+                            "title": existing_doc.title,
+                            "reason": "soft_deleted",
+                        })
+                        report["existing_preserved"].append({
+                            "url": source_url,
+                            "document_id": existing_doc.id,
+                            "title": existing_doc.title,
+                            "action": "skipped_soft_deleted",
+                        })
+                        continue
+
+                    if (existing_doc.cover_image_url or "").strip():
+                        report["backfill_skipped"].append({
+                            "url": source_url,
+                            "document_id": existing_doc.id,
+                            "title": existing_doc.title,
+                            "reason": "already_has_cover_image",
+                        })
+                        report["existing_preserved"].append({
+                            "url": source_url,
+                            "document_id": existing_doc.id,
+                            "title": existing_doc.title,
+                            "action": "preserved_existing_cover_image",
+                        })
+                        continue
+
+                    if not cover_image_url:
+                        report["backfill_skipped"].append({
+                            "url": source_url,
+                            "document_id": existing_doc.id,
+                            "title": existing_doc.title,
+                            "reason": "no_valid_cover_image_in_source",
+                        })
+                        report["existing_preserved"].append({
+                            "url": source_url,
+                            "document_id": existing_doc.id,
+                            "title": existing_doc.title,
+                            "action": "skipped_no_source_cover",
+                        })
+                        continue
+
+                    target_alt = _extract_cover_from_item(
+                        {"cover_image_url": cover_image_url, "cover_image_alt": cover_image_alt},
+                        title=existing_doc.title or title,
+                    )[1] or (existing_doc.title or title)[:255]
+
+                    report["to_backfill"].append({
+                        "document_id": existing_doc.id,
+                        "url": source_url,
+                        "title": existing_doc.title,
+                        "cover_image_url": cover_image_url,
+                        "cover_image_alt": target_alt,
+                    })
+                    to_backfill_docs.append((existing_doc, cover_image_url, target_alt))
+                    continue
+
                 report["existing_preserved"].append({
                     "url": source_url,
                     "document_id": existing_doc.id,
@@ -168,16 +338,17 @@ class CorpusImporter:
                 continue
 
             # Determine Document ID
-            item_id = item.get("id")
-            if item_id:
-                item_id = str(item_id).strip()
-                if item_id in existing_docs_by_id:
-                    existing_by_id = existing_docs_by_id[item_id]
+            # Legacy crawler runs emitted sequential integer counters (1, 2, 3...) as 'id'.
+            # Treat numeric-only IDs as non-UUID counters and derive a stable UUIDv5 from source_url.
+            raw_item_id = item.get("id")
+            item_id_str = str(raw_item_id).strip() if raw_item_id is not None else ""
+            if item_id_str and not item_id_str.isdigit():
+                if item_id_str in existing_docs_by_id:
+                    existing_by_id = existing_docs_by_id[item_id_str]
                     if existing_by_id.source_url != source_url:
-                        # Conflict: ID belongs to a different document
                         report["conflicts_with_db"].append({
                             "index": idx,
-                            "id": item_id,
+                            "id": item_id_str,
                             "url": source_url,
                             "conflict_with_doc_url": existing_by_id.source_url,
                             "reason": "ID collision with different source_url in database",
@@ -186,12 +357,12 @@ class CorpusImporter:
                     else:
                         report["existing_preserved"].append({
                             "url": source_url,
-                            "document_id": item_id,
+                            "document_id": item_id_str,
                             "title": existing_by_id.title,
                             "action": "preserved_existing_user_edits",
                         })
                         continue
-                doc_id = item_id
+                doc_id = item_id_str
             else:
                 doc_id = generate_doc_uuid_from_url(source_url)
 
@@ -263,8 +434,8 @@ class CorpusImporter:
                 "source_url": source_url,
                 "source_license": source_license,
                 "source_attribution": source_attrib,
-                "cover_image_url": item.get("cover_image_url"),
-                "cover_image_alt": item.get("cover_image_alt"),
+                "cover_image_url": cover_image_url,
+                "cover_image_alt": cover_image_alt,
                 "seo_title": item.get("seo_title"),
                 "seo_description": item.get("seo_description"),
                 "seo_keywords": item.get("seo_keywords"),
@@ -273,8 +444,8 @@ class CorpusImporter:
             report["to_insert"].append({"id": doc_id, "url": source_url, "title": title})
             to_create_docs.append(doc_entry)
 
-        # Apply insertions if NOT dry run
-        if not self.dry_run and to_create_docs:
+        # Apply insertions and/or cover image backfills if NOT dry run
+        if not self.dry_run and (to_create_docs or to_backfill_docs):
             for d_info in to_create_docs:
                 doc = Document(
                     id=d_info["id"],
@@ -312,8 +483,19 @@ class CorpusImporter:
                 existing_docs_by_url[d_info["source_url"]] = doc
                 existing_docs_by_id[doc.id] = doc
 
+            for existing_doc, new_cover_url, new_cover_alt in to_backfill_docs:
+                existing_doc.cover_image_url = new_cover_url
+                existing_doc.cover_image_alt = new_cover_alt
+                self.db.flush()
+                record_revision_and_outbox_job(self.db, existing_doc)
+
             self.db.commit()
 
         report["inserted_count"] = len(to_create_docs) if not self.dry_run else 0
         report["preserved_count"] = len(report["existing_preserved"])
+        report["would_update_count"] = len(to_backfill_docs)
+        report["updated_count"] = len(to_backfill_docs) if not self.dry_run else 0
+        report["skipped_count"] = (
+            len(report["backfill_skipped"]) if backfill_images else len(report["existing_preserved"])
+        )
         return report
