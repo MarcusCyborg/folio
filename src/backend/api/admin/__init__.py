@@ -67,6 +67,10 @@ from src.backend.services.admin.analytics_service import (
     admin_update_document_seo,
     admin_get_analytics_overview,
 )
+from src.backend.services.admin.database_service import (
+    admin_list_database_tables,
+    admin_get_database_table_rows,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -372,3 +376,26 @@ def get_analytics(
     db: Session = Depends(get_db),
 ):
     return admin_get_analytics_overview(db, date_from=date_from, date_to=date_to)
+
+
+# ==============================================================================
+# Read-Only Database Explorer
+# ==============================================================================
+
+@router.get("/database/tables")
+def list_database_tables(
+    current_user: User = Depends(require_any_permission("settings:write", "audit:read")),
+    db: Session = Depends(get_db),
+):
+    return admin_list_database_tables(db)
+
+
+@router.get("/database/tables/{table_name}")
+def get_database_table_rows(
+    table_name: str = Path(...),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    current_user: User = Depends(require_any_permission("settings:write", "audit:read")),
+    db: Session = Depends(get_db),
+):
+    return admin_get_database_table_rows(db, table_name=table_name, page=page, page_size=page_size)

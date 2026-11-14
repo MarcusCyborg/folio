@@ -28,6 +28,7 @@ export function wrapAdminLayout(currentPath, pageTitle, contentHtml) {
         { label: 'Users & Staff', path: '/admin/users', perm: ['users:manage'] },
         { label: 'Roles Matrix', path: '/admin/roles', perm: ['roles:manage'] },
         { label: 'Audit Trail', path: '/admin/audit', perm: ['audit:read'] },
+        { label: 'Database Explorer', path: '/admin/database', perm: ['settings:write', 'audit:read'] },
         { label: 'Settings', path: '/admin/settings', perm: ['settings:write'] },
       ]
     }

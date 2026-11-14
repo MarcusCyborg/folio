@@ -7,6 +7,7 @@ import { renderAdminDocuments, renderDocumentEditor, renderTaxonomyManager } fro
 import { renderCommentsQueue, renderReportsQueue } from './moderation_views.js';
 import { renderUsersManager, renderRolesMatrix, renderAuditLogs, renderSettingsManager } from './governance_views.js';
 import { renderSeoManager, renderAnalyticsDashboard } from './analytics_views.js';
+import { renderDatabaseExplorer } from './database_views.js';
 
 // Ensure admin stylesheet is loaded in head if not already loaded by shell
 function ensureAdminStyles() {
@@ -106,6 +107,10 @@ export const routes = [
   {
     path: '/admin/audit',
     render: renderAuditLogs
+  },
+  {
+    path: '/admin/database',
+    render: renderDatabaseExplorer
   },
   {
     path: '/admin/settings',
