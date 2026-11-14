@@ -1587,7 +1587,8 @@ a:focus-visible {
   .like-btn.like-pop .heart-icon,
   .skeleton-line,
   .library-sidebar,
-  .library-sidebar.open {
+  .library-sidebar.open,
+  .back-to-top-btn {
     animation: none !important;
     transition: none !important;
   }

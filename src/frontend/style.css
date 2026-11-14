@@ -563,3 +563,70 @@ body {
   max-width: 100%;
   vertical-align: baseline;
 }
+
+/* Back to Top Floating Button */
+.back-to-top-btn {
+  position: fixed;
+  bottom: 1.75rem;
+  right: 1.75rem;
+  z-index: 900;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.55rem 0.95rem;
+  background: var(--color-surface);
+  color: var(--color-accent);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-md);
+  font-family: var(--font-ui);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(10px);
+  transition: opacity var(--duration-state) var(--ease-folio),
+              transform var(--duration-state) var(--ease-folio),
+              visibility var(--duration-state) var(--ease-folio),
+              background-color var(--duration-fast) var(--ease-folio),
+              color var(--duration-fast) var(--ease-folio),
+              border-color var(--duration-fast) var(--ease-folio),
+              box-shadow var(--duration-fast) var(--ease-folio);
+}
+
+.back-to-top-btn.is-visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.back-to-top-btn:hover {
+  background: var(--color-accent);
+  color: #FFFFFF;
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
+}
+
+.back-to-top-btn:active {
+  transform: translateY(0) scale(0.97);
+}
+
+@media (max-width: 640px) {
+  .back-to-top-btn {
+    bottom: 1.15rem;
+    right: 1.15rem;
+    padding: 0;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+  }
+
+  .back-to-top-label {
+    display: none;
+  }
+}

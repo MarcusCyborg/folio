@@ -6,6 +6,7 @@ import { initRouter, navigate } from './core/router.js';
 import { routes as publicRoutes } from './public/index.js';
 import { routes as adminRoutes } from './admin/index.js';
 import { api } from './core/api.js';
+import { prefersReducedMotion } from './core/motion.js';
 
 // Preserve same-origin API_BASE resolution
 export const API_BASE = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http'))
@@ -124,8 +125,43 @@ export async function loadPublicSettings() {
   }
 }
 
+function initBackToTopButton() {
+  const btn = document.getElementById('backToTopBtn');
+  if (!btn) return;
+
+  const SCROLL_THRESHOLD = 300;
+  let rafId = null;
+
+  const updateVisibility = () => {
+    rafId = null;
+    const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+    const isVisible = scrollY > SCROLL_THRESHOLD;
+    btn.classList.toggle('is-visible', isVisible);
+    btn.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+    btn.tabIndex = isVisible ? 0 : -1;
+  };
+
+  const onScroll = () => {
+    if (rafId !== null) return;
+    rafId = requestAnimationFrame(updateVisibility);
+  };
+
+  btn.addEventListener('click', () => {
+    window.scrollTo({
+      top: 0,
+      behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+    });
+  });
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('hashchange', updateVisibility);
+  updateVisibility();
+}
+
 async function bootstrap() {
   const appContainer = document.getElementById('app');
+
+  initBackToTopButton();
 
   // 1. Subscribe user menu & protected route guard to session changes across tabs
   let previousUser = null;

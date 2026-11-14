@@ -2302,3 +2302,40 @@ def test_issue3_font_loading_without_rewrite(frontend_server, playwright_instanc
     assert len(font_results["loaded"]) > 0, "No FontFaces were loaded"
 
     context.close()
+
+
+def test_back_to_top_button_visibility_and_scroll(frontend_server, playwright_instance):
+    """
+    Verifies Back to Top button behavior:
+    - Hidden when at top of page (scrollY <= 300)
+    - Appears (.is-visible) when scrolled past 300px
+    - Clicking scrolls page back to top (scrollY == 0) and hides the button again
+    """
+    context = playwright_instance.new_context(
+        viewport={"width": 1280, "height": 720},
+        reduced_motion="reduce",
+    )
+    page = context.new_page()
+    setup_mock_api(page)
+
+    page.goto(f"{frontend_server}/#/documents/doc-algo-1")
+    page.wait_for_selector(".document-detail-article")
+
+    back_btn = page.locator("#backToTopBtn")
+    assert back_btn.count() == 1
+    assert not back_btn.evaluate("el => el.classList.contains('is-visible')")
+    assert back_btn.get_attribute("aria-hidden") == "true"
+
+    # Scroll down past 300px threshold
+    page.evaluate("() => window.scrollTo(0, 600)")
+    page.wait_for_function("() => document.getElementById('backToTopBtn').classList.contains('is-visible')")
+    assert back_btn.is_visible()
+    assert back_btn.get_attribute("aria-hidden") == "false"
+
+    # Click Back to Top button
+    back_btn.click()
+    page.wait_for_function("() => window.scrollY === 0")
+    page.wait_for_function("() => !document.getElementById('backToTopBtn').classList.contains('is-visible')")
+    assert back_btn.get_attribute("aria-hidden") == "true"
+
+    context.close()
